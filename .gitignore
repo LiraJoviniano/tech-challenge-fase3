@@ -216,3 +216,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Dados: manter apenas a estrutura das pastas
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# Modelos treinados
+models/
+*.pkl
+*.joblib
+
+# Credenciais locais
+.env
+.env.*
+!.env.example
+
+# Arquivos locais do Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
