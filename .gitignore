@@ -238,3 +238,5 @@ models/
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+# Saidas de consulta: reproduziveis a partir dos .sql versionados
+sql/resultados/
