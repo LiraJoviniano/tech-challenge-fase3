@@ -219,6 +219,11 @@ __marimo__/
 
 # Dados: manter apenas a estrutura das pastas
 data/**
+
+# A amostra estratificada e versionada: torna os notebooks executaveis
+# sem depender do S3, que expira junto com a sessao do laboratorio.
+!data/sample/
+!data/sample/**
 !data/**/
 !data/**/.gitkeep
 
@@ -238,5 +243,10 @@ models/
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+
 # Saidas de consulta: reproduziveis a partir dos .sql versionados
 sql/resultados/
+
+# Saidas de predicao do modelo
+results/
+
