@@ -14,6 +14,7 @@ Fontes, todas lidas pelo Glue Catalog:
     alfabetizacao_silver.fato_aluno            alvo e atributos do estudante
     alfabetizacao_silver.dim_territorio        UF e regiao
     alfabetizacao_gold.features_municipio      contexto educacional
+    alfabetizacao_gold.trajetoria_meta_2030    meta pactuada do municipio
     fase3_bronze.censo_2022_municipio          demografia e domicilios
     fase3_bronze.pib_municipal_municipio       economia
 
@@ -95,6 +96,7 @@ TABELAS = {
     "aluno": ("silver", "fato_aluno"),
     "territorio": ("silver", "dim_territorio"),
     "municipio_educacional": ("gold", "features_municipio"),
+    "meta": ("gold", "trajetoria_meta_2030"),
     "censo": ("fase3", "censo_2022_municipio"),
     "pib": ("fase3", "pib_municipal_municipio"),
 }
@@ -129,6 +131,10 @@ ESQUEMA_GOLD = [
     ("mun_indice_infraestrutura", "double"),
     ("mun_pct_rural", "double"),
     ("mun_pct_transporte", "double"),
+    # --- meta pactuada do município
+    ("mun_meta_ano_alvo", "double"),
+    ("mun_distancia_meta_anterior", "double"),
+    ("mun_elegivel_meta", "boolean"),
     # --- contexto socioeconômico
     ("mun_populacao", "int"),
     ("mun_densidade", "double"),
@@ -201,6 +207,38 @@ def preparar_municipio_educacional(df: DataFrame) -> DataFrame:
         F.col("indice_infraestrutura").alias("mun_indice_infraestrutura"),
         F.col("pct_matricula_rural").alias("mun_pct_rural"),
         F.col("pct_matricula_transporte").alias("mun_pct_transporte"),
+    )
+
+
+def preparar_meta(df: DataFrame) -> DataFrame:
+    """
+    Meta pactuada do município e a distância a ela no ano anterior.
+
+    A maior parte de `trajetoria_meta_2030` é derivada de `taxa_2024` —
+    `distancia_meta_2030`, `ritmo_necessario`, `indice_trajetoria`,
+    `classificacao_trajetoria` e `atingiu_meta_2024` todas partem do
+    resultado que o modelo deve prever. Usá-las seria vazamento.
+
+    Três informações sobrevivem ao corte, e são úteis:
+
+    `meta_2024` é o alvo pactuado, publicado antes da avaliação.
+
+    `taxa_2023 − meta_2024` mede quanto faltava ao município no fim de
+    2023 para alcançar a meta do ano seguinte. Combina duas informações
+    disponíveis no momento da predição, e capta pressão institucional
+    sobre a rede — município longe da meta tende a mobilizar esforço.
+
+    `elegivel_meta` distingue quem tem meta publicada de quem não tem, o
+    que é característica do município e não do resultado.
+    """
+
+    return df.select(
+        "id_municipio",
+        F.col("meta_2024").alias("mun_meta_ano_alvo"),
+        (F.col("taxa_2023") - F.col("meta_2024")).alias(
+            "mun_distancia_meta_anterior"
+        ),
+        F.col("elegivel_meta").alias("mun_elegivel_meta"),
     )
 
 
@@ -338,6 +376,7 @@ def construir(fontes: dict) -> DataFrame:
 
     aluno = preparar_aluno(fontes["aluno"])
     educacional = preparar_municipio_educacional(fontes["municipio_educacional"])
+    meta = preparar_meta(fontes["meta"])
     socioeconomico = preparar_socioeconomico(fontes["censo"], fontes["pib"])
 
     territorio = fontes["territorio"].select(
@@ -347,6 +386,7 @@ def construir(fontes: dict) -> DataFrame:
     resultado = (
         aluno.join(territorio, "id_municipio", "left")
         .join(educacional, "id_municipio", "left")
+        .join(meta, "id_municipio", "left")
         .join(socioeconomico, "id_municipio", "left")
     )
 

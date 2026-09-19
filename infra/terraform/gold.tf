@@ -157,6 +157,13 @@ locals {
         { name = "mun_indice_infraestrutura", type = "double" },
         { name = "mun_pct_rural", type = "double" },
         { name = "mun_pct_transporte", type = "double" },
+        // Meta pactuada, publicada antes da avaliacao. As demais colunas
+        // de trajetoria_meta_2030 derivam de taxa_2024 e seriam vazamento
+        { name = "mun_meta_ano_alvo", type = "double" },
+        // taxa_2023 - meta_2024: quanto faltava no fim de 2023 para
+        // alcancar a meta do ano seguinte
+        { name = "mun_distancia_meta_anterior", type = "double" },
+        { name = "mun_elegivel_meta", type = "boolean" },
         { name = "mun_populacao", type = "int" },
         { name = "mun_densidade", type = "double" },
         { name = "mun_moradores_por_domicilio", type = "double" },
