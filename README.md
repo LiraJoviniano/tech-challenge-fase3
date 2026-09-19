@@ -84,6 +84,7 @@ Cobrir nesta seção:
 | Aluno | Fase 2 · Silver | `fato_aluno` | aluno × ano | Alvo e atributos individuais |
 | Município | Fase 2 · Silver | `dim_territorio` | município | UF e região |
 | Município | Fase 2 · Gold | `features_municipio` | município | Contexto educacional |
+| Município | Fase 2 · Gold | `trajetoria_meta_2030` | município | Meta pactuada |
 | Município | IBGE · Censo 2022 | `municipio` | município | População, domicílios, área, alfabetização adulta |
 | Município | IBGE · PIB | `municipio` | município × ano | Capacidade econômica |
 
@@ -95,13 +96,13 @@ que entrega dado pronto para consumo passa a entregar o que este consumo exige.
 
 ### `features_aluno` ✅
 
-Uma linha por estudante avaliado em 2024, com 32 colunas.
+Uma linha por estudante avaliado em 2024, com 35 colunas.
 
 | Métrica | Valor |
 |---|---:|
 | Linhas | 1.610.754 |
 | Municípios | 5.450 |
-| Colunas | 32 |
+| Colunas | 35 |
 | Alvo positivo (`alfabetizado`) | 59,4% |
 | Sem contexto municipal | 0 |
 
@@ -115,7 +116,17 @@ não seria verdade numa base 90/10.
 | Marcações | `uf_anomala` |
 | Aluno | `rede_codigo`, `caderno` |
 | Contexto educacional do município | `mun_taxa_ano_anterior`, `mun_total_escolas`, `mun_alunos_por_docente`, `mun_alunos_por_turma`, `mun_pct_integral`, `mun_indice_infraestrutura`, `mun_pct_rural`, `mun_pct_transporte` |
+| Meta pactuada | `mun_meta_ano_alvo`, `mun_distancia_meta_anterior`, `mun_elegivel_meta` |
 | Contexto socioeconômico | `mun_populacao`, `mun_densidade`, `mun_moradores_por_domicilio`, `mun_taxa_alfabetizacao_adulta`, `mun_idade_mediana`, `mun_indice_envelhecimento`, `mun_pct_indigena`, `mun_pct_quilombola`, `mun_pib_per_capita`, `mun_pct_va_agropecuaria`, `mun_pct_va_industria`, `mun_pct_va_servicos`, `mun_pct_va_administracao_publica` |
+
+**Das treze colunas de `trajetoria_meta_2030`, apenas três entraram.** As demais —
+`distancia_meta_2030`, `ritmo_necessario`, `indice_trajetoria`, `classificacao_trajetoria`
+e `atingiu_meta_2024` — derivam de `taxa_2024`, que é o resultado a prever.
+
+O que sobrevive ao corte é informação disponível antes da avaliação: a meta pactuada, a
+elegibilidade do município, e `taxa_2023 − meta_2024`, que mede quanto faltava no fim de
+2023 para alcançar a meta do ano seguinte. Essa última capta pressão institucional sobre
+a rede — município longe da meta tende a mobilizar esforço.
 
 **A taxa de alfabetização adulta usa 25 anos ou mais.** A faixa da fonte começa em 15,
 mas 15 a 24 inclui jovens ainda em formação, cuja alfabetização reflete o presente do
@@ -379,8 +390,6 @@ Candidatos já identificados:
   da prefeitura. Avaliada e adiada por custo de exploração — 306 colunas e edições de
   anos distintos
 - Features no grão da escola, se surgir chave que ligue a avaliação ao Censo Escolar
-- Cadastro Único: **não disponível** na Base dos Dados, verificado por busca em
-  `cadastro`, `mds` e `social`
 - Reaprendizado periódico e publicação do modelo como serviço
 
 ---
