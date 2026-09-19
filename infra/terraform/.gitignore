@@ -1,0 +1,7 @@
+# Estado do Terraform: descreve a infraestrutura e o ID da conta
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Valores especificos de cada pessoa
+terraform.tfvars
