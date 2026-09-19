@@ -211,7 +211,7 @@ são 3,87 milhões de linhas e quatro joins — volume em que o Spark paga o pro
 
 ### Recursos declarados em Terraform ✅
 
-Um `terraform apply` cria **6 recursos**:
+Um `terraform apply` cria **9 recursos**:
 
 | Recurso | Qtde | Papel |
 |---|---:|---|
@@ -220,6 +220,8 @@ Um `terraform apply` cria **6 recursos**:
 | `aws_glue_job` | 1 | Constrói `features_aluno` — Glue 4.0, 2× G.1X |
 | `aws_s3_object` | 1 | Upload do script PySpark |
 | `aws_glue_catalog_table` | 1 | `features_aluno`, com schema declarado |
+| `aws_glue_workflow` | 1 | Orquestração |
+| `aws_glue_trigger` | 2 | Encadeamento condicional |
 
 **Crawler na Bronze, schema declarado na Gold.** Na Bronze o schema vem de quem produziu
 o dado, e descobri-lo automaticamente é apropriado. Na Gold é decisão: as colunas de
@@ -254,6 +256,31 @@ Medido por *dry run* antes de cada execução, sem gerar custo:
 
 O BigQuery cobra por coluna varrida: a seleção explícita de colunas é o que reduz custo, e
 `LIMIT` corta o retorno, não a varredura.
+
+### Orquestração ✅
+
+O fluxo se encadeia dentro da AWS por **Glue Workflow**:
+
+```
+trigger ON_DEMAND
+  └─ crawler da Bronze
+      └─ (SUCCEEDED) job da Gold
+```
+
+A Gold só é gerada se a catalogação tiver sucesso. Sem o encadeamento, o Job leria um
+Catalog desatualizado e produziria dado silenciosamente errado: a partição nova não
+estaria registrada, e a leitura traria a carga anterior sem qualquer aviso.
+
+**A ingestão fica fora do fluxo, e isso é limitação declarada.** O Glue Workflow encadeia
+apenas crawlers e jobs; os dois scripts de ingestão são Python local. Convertê-los em
+Glue Jobs Python Shell traria o ciclo inteiro para dentro do Workflow — foi avaliado, e o
+custo seria baixo, 0,0625 DPU. Mas as ingestões somam 54 MB e rodam em segundos
+localmente; empacotá-las em Glue para orquestrar duas etapas que executam uma vez por ano
+não se justifica.
+
+**Por que `ON_DEMAND` e não agendado.** O Censo Demográfico é decenal, o PIB é anual e a
+avaliação do INEP é anual. Agendamento diário dispararia execuções reprocessando o mesmo
+dado.
 
 ### Validação da Gold ✅
 
@@ -534,23 +561,19 @@ terraform apply
 cd ../..
 ```
 
-**4. Catalogar a Bronze** — o script confere se `dt_ingestao` virou chave de partição:
+**4. Executar o fluxo** — crawler e Gold encadeados:
+
+```bash
+bash infra/executar_workflow.sh
+```
+
+O script dispara o Workflow, acompanha as duas etapas e mostra a saída no S3 ao final.
+
+Para depurar uma etapa isolada, sem rodar o fluxo:
 
 ```bash
 bash infra/executar_crawler.sh
-```
-
-**5. Construir a Gold** — `features_aluno`, no grão do aluno:
-
-```bash
 aws glue start-job-run --job-name fase3_job_gold --region us-east-1
-```
-
-Acompanhamento:
-
-```bash
-aws glue get-job-runs --job-name fase3_job_gold --max-items 1 \
-  --query 'JobRuns[0].[JobRunState,ExecutionTime,ErrorMessage]' --output text
 ```
 
 Validação:
@@ -560,7 +583,7 @@ aws s3 ls s3://<bucket>/fase3/gold/features_aluno/ --recursive --region us-east-
 bash scripts/consultar.sh verificacao_features_aluno
 ```
 
-**6. Construir o dataset de modelagem** ⏳
+**5. Construir o dataset de modelagem** ⏳
 
 ```bash
 # python src/preprocessing/dataset.py
@@ -618,7 +641,8 @@ pip install -r requirements-dev.txt
 │   └── sample/       # amostra estratificada (VERSIONADA)
 ├── images/           # figuras geradas, para o README
 ├── infra/
-│   ├── terraform/    # databases, crawler, job e tabela da Gold
+│   ├── terraform/    # databases, crawler, job, tabela e workflow
+│   ├── executar_workflow.sh
 │   └── executar_crawler.sh
 ├── notebooks/        # EDA, modelagem e interpretabilidade
 ├── reports/
