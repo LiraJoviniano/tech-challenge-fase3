@@ -8,3 +8,8 @@ jupyterlab==4.6.3
 ipykernel==7.3.0
 pyarrow==25.0.1
 shap==0.52.0
+google-cloud-bigquery==3.42.3
+google-cloud-bigquery-storage==2.39.0
+db-dtypes==1.4.3
+boto3==1.43.60
+python-dotenv==1.2.2
