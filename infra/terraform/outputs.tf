@@ -32,3 +32,13 @@ output "comando_executar_gold" {
   description = "Executar e acao, nao estado."
   value       = "aws glue start-job-run --job-name ${aws_glue_job.gold.name}"
 }
+
+output "workflow" {
+  description = "Workflow que encadeia crawler e Gold."
+  value       = aws_glue_workflow.fase3.name
+}
+
+output "comando_executar_workflow" {
+  description = "O Terraform declara o fluxo; iniciar a execucao e acao."
+  value       = "bash infra/executar_workflow.sh"
+}
