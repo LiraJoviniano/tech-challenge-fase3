@@ -1,0 +1,64 @@
+{
+  "alvo": "alfabetizado",
+  "alvo_invertido": true,
+  "coluna_grupo": "id_municipio",
+  "numericas_log": [
+    "mun_total_escolas",
+    "mun_populacao",
+    "mun_densidade",
+    "mun_pct_indigena",
+    "mun_pct_quilombola",
+    "mun_pib_per_capita"
+  ],
+  "numericas_padrao": [
+    "mun_taxa_ano_anterior",
+    "mun_alunos_por_docente",
+    "mun_alunos_por_turma",
+    "mun_pct_integral",
+    "mun_indice_infraestrutura",
+    "mun_pct_rural",
+    "mun_pct_transporte",
+    "mun_distancia_meta_anterior",
+    "mun_moradores_por_domicilio",
+    "mun_taxa_alfabetizacao_adulta",
+    "mun_indice_envelhecimento",
+    "mun_pct_va_agropecuaria",
+    "mun_pct_va_industria",
+    "mun_pct_va_servicos",
+    "mun_pct_va_administracao_publica"
+  ],
+  "categoricas": [
+    "regiao",
+    "sigla_uf"
+  ],
+  "binarias": [
+    "mun_elegivel_meta"
+  ],
+  "imputacao": {
+    "numericas": "median",
+    "categoricas": "most_frequent",
+    "binarias_valor": 0
+  },
+  "excluidas": {
+    "identificadores": [
+      "id_aluno",
+      "id_escola",
+      "id_municipio"
+    ],
+    "constantes": [
+      "ano",
+      "rede_codigo"
+    ],
+    "peso_amostral": [
+      "peso_aluno"
+    ],
+    "descartadas_na_selecao": [
+      "caderno",
+      "uf_anomala"
+    ],
+    "redundantes": [
+      "mun_meta_ano_alvo",
+      "mun_idade_mediana"
+    ]
+  }
+}
