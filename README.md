@@ -311,16 +311,46 @@ de dados existe — PIB total de 2023, composição setorial de 2021.
 
 ## 5. Etapas de modelagem
 
-> ⏳ *A preencher na S3 e S4.*
+> 🚧 *Pré-processamento e baseline concluídos (S3). Comparação de algoritmos na S4.*
 
-Cobrir nesta seção:
+**Seleção de features** — [`notebooks/02_selecao_features.ipynb`](notebooks/02_selecao_features.ipynb).
+Das 35 colunas de `features_aluno`, **24 entram no modelo** e 11 ficam de fora, cada uma
+com motivo e evidência no notebook:
 
-- Divisão treino / validação / teste **agrupada por município**
-- Pipeline do scikit-learn, com imputação, encoding e escalonamento **dentro** do
-  estimador, para que a transformação aprendida no treino não vaze para o teste
-- Estratégia de amostragem e sua justificativa
+| Grupo | Colunas | Motivo |
+|---|---|---|
+| Alvo | `alfabetizado` | Vira o `y` |
+| Identificadores | `id_aluno`, `id_escola`, `id_municipio` | Rótulos sem significado; `id_municipio` define os grupos da divisão |
+| Constantes | `ano`, `rede_codigo` | Um único valor em toda a base |
+| Peso amostral | `peso_aluno` | Descreve o desenho da avaliação, não o aluno |
+| Descartadas | `caderno`, `uf_anomala` | `caderno` só existe no dia da prova; `uf_anomala` é idêntica a `sigla_uf == "RS"` |
+| Redundantes | `mun_meta_ano_alvo`, `mun_idade_mediana` | Correlação acima de 0,9 com outras features (a meta é calculável a partir da taxa e da distância) |
 
----
+As decisões ficam em [`src/config/features_modelo.json`](src/config/features_modelo.json),
+lido pelo notebook de modelagem: a lista de features existe em um único lugar.
+
+**Alvo invertido.** `1 = não alfabetizado`. Precisão, recall e F1 passam a medir a classe
+de risco, que é a que a política pública precisa encontrar.
+
+**Divisão por município** — [`notebooks/03_modelagem_supervisionada.ipynb`](notebooks/03_modelagem_supervisionada.ipynb).
+`GroupShuffleSplit` com 20% dos municípios no teste: treino com 4.360 municípios
+(1.320.423 alunos) e teste com 1.090 (290.331), sem município em comum. Taxa de risco de
+40,9% e 39,3%. O teste fica reservado para a avaliação final; a comparação de modelos usa
+`GroupKFold` de 5 rodadas dentro do treino.
+
+**Pipeline.** Pré-processamento e modelo num único `Pipeline` do scikit-learn, aprendendo
+só com o treino de cada rodada:
+
+| Grupo | Imputação | Transformação |
+|---|---|---|
+| 6 numéricas muito assimétricas (população, densidade, PIB per capita…) | Mediana | `log1p` + padronização |
+| 15 numéricas | Mediana | Padronização |
+| `regiao`, `sigla_uf` | Mais frequente | One-hot |
+| `mun_elegivel_meta` | Constante 0 | — |
+
+**Estratégia de amostragem.** A base completa é usada, sem reamostragem: o alvo é
+relativamente balanceado (59,4% × 40,6%), e a classe de risco recebe mais peso com
+`class_weight="balanced"`.
 
 ## 6. Escolha do algoritmo
 
@@ -337,17 +367,25 @@ escolha errada.
 
 ## 7. Métricas de avaliação
 
-> ⏳ *A preencher na S4 e S6.*
+> 🚧 *Baseline avaliado (S3). Curvas ROC e de precisão-recall, e o contraste entre
+> divisão aleatória e por município, na S4 e S6.*
 
-Cobrir nesta seção:
+**Métrica prioritária: recall da classe de risco.** O falso negativo, deixar de sinalizar
+uma criança em risco, é o erro mais grave. O recall é acompanhado de precisão e F1, porque
+um modelo que apontasse risco para todos teria recall de 100% e nenhuma utilidade. A
+acurácia não serve sozinha: o modelo que responde sempre "alfabetizado" acerta 59%.
 
-- Quais métricas e **por que essas**. O custo de um falso negativo — deixar de sinalizar
-  uma criança em risco — não é igual ao de um falso positivo
-- Matriz de confusão, curva ROC, curva de precisão-recall
-- O contraste entre a métrica com divisão aleatória e com divisão por município, que é a
-  evidência de que o vazamento de contexto foi tratado
+**Baseline** (validação cruzada por município, 5 rodadas, treino):
 
----
+| Modelo | ROC-AUC | Recall | Precisão | F1 | Acurácia |
+|---|---|---|---|---|---|
+| Ingênuo (classe mais comum) | 0,500 | 0,000 | 0,000 | 0,000 | 0,591 |
+| Regressão logística | **0,661** | **0,652** | 0,516 | 0,573 | 0,607 |
+
+Das 540.192 crianças em risco no treino, a regressão logística encontra 353.852 (65,5%).
+Dos alertas que emite, 51,5% estão corretos, contra 41% se fossem dados ao acaso. Tabela
+completa em [`reports/modelagem/`](reports/modelagem/) e matriz de confusão em
+[`images/matriz_confusao_baseline.png`](images/matriz_confusao_baseline.png).
 
 ## 8. Interpretação dos resultados
 
@@ -411,6 +449,14 @@ features municipais, contra 1,6 milhão de linhas.
 industrial negativo de −477 milhões em 2021 — provável ajuste contábil do IBGE. As
 proporções ficam nulas em vez de inverter de sinal.
 
+**Features quase todas municipais.** Das 24 features, nenhuma descreve o aluno: crianças
+do mesmo município recebem praticamente a mesma previsão. O modelo ranqueia municípios
+mais do que alunos, o que limita o poder de separação (ROC-AUC de 0,66 no baseline).
+
+**Percentuais acima de 100%.** `mun_pct_rural` e `mun_pct_transporte` passam de 100% em
+1.279 (23%) e 1.105 (20%) municípios, com máximos de 552,6% e 467,0%. A frequência indica
+erro no cálculo dessas colunas; foram mantidas no baseline, e a interpretação delas deve
+ser feita com cautela.
 ---
 
 ## 11. Aplicação prática para políticas públicas
@@ -674,14 +720,15 @@ principal — não é necessário instalar nada à parte.
 │   └── executar_crawler.sh
 ├── notebooks/        # EDA, modelagem e interpretabilidade
 ├── reports/
-│   └── ingestao/     # manifesto de execucoes (VERSIONADO)
+│   ├── ingestao/     # manifesto de execucoes (VERSIONADO)
+│   └── modelagem/    # metricas dos modelos (VERSIONADO)
 ├── scripts/
 │   └── consultar.sh  # executor de consultas no Athena
 ├── sql/
 │   ├── bronze/       # verificacao do historico de ingestao
 │   └── gold/         # verificacao e exploracao do dataset
 ├── src/
-│   ├── config/       # settings centralizado
+│   ├── config/       # settings e features_modelo.json
 │   ├── ingestion/    # busca, exploracao, extracao e sincronizacao
 │   ├── preprocessing/# pipeline de transformacao para ML
 │   ├── transformation/ # Glue Job da Gold
@@ -747,6 +794,8 @@ contexto perdido amanhã.
 | Gráficos SHAP | `images/` | ⏳ |
 | Relatório técnico | `reports/` | ⏳ |
 | Vídeo executivo (até 5 min) | — | ⏳ |
+| Notebook de modelagem | [`notebooks/03_modelagem_supervisionada.ipynb`](notebooks/03_modelagem_supervisionada.ipynb) | 🚧 |
+| Matriz de confusão e curva ROC | [`images/matriz_confusao_baseline.png`](images/matriz_confusao_baseline.png) | 🚧 |
 
 A primeira delas é a que comprova a correção apontada na avaliação da Fase 2: a partição
 por data de ingestão é reconhecida pelo Glue e consultável no Athena, então cargas
@@ -762,7 +811,7 @@ anteriores coexistem em vez de serem sobrescritas.
 | S1 | 14–20/set | Ingestão socioeconômica e catalogação | ✅ |
 | S1 | 14–20/set | Gold no grão do aluno, com vazamento tratado | ✅ |
 | S2 | 21–27/set | EDA | ✅ |
-| S3 | 28/set–04/out | Pré-processamento e baseline | ⏳ |
+| S3 | 28/set–04/out | Pré-processamento e baseline | ✅ |
 | S4 | 05–11/out | Modelagem — algoritmos comparados | ⏳ |
 | S5 | 12–18/out | Otimização de hiperparâmetros | ⏳ |
 | S6 | 19–25/out | Avaliação e interpretabilidade | ⏳ |
