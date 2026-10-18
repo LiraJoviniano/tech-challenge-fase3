@@ -1,0 +1,6 @@
+{
+  "modelo": "Regressão logística",
+  "params": "padrão do catálogo",
+  "limiar": 0.4655048184840422,
+  "meta_recall": 0.7
+}
