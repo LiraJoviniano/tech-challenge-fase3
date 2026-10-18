@@ -1,0 +1,13 @@
+{
+  "modelo": "HistGradientBoosting",
+  "params": {
+    "min_samples_leaf": 100,
+    "max_leaf_nodes": 15,
+    "max_iter": 300,
+    "max_depth": 4,
+    "learning_rate": 0.03,
+    "l2_regularization": 1.0
+  },
+  "limiar": 0.47360581249921335,
+  "meta_recall": 0.7
+}
