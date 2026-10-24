@@ -34,6 +34,16 @@
   "binarias": [
     "mun_elegivel_meta"
   ],
+  "limitar_extremos": {
+    "colunas": [
+      "mun_alunos_por_turma",
+      "mun_alunos_por_docente",
+      "mun_pct_rural",
+      "mun_pct_transporte"
+    ],
+    "percentil_superior": 0.99,
+    "motivo": "Razoes do Censo Escolar com numerador e denominador de populacoes diferentes. Turmas multisseriadas em areas indigenas nao contam como turma de anos iniciais (Jordao-AC: 109,9 alunos por turma, mediana 20,3); matriculas rurais e de transporte contam todas as etapas, e o denominador so anos iniciais (pct_rural chega a 552%). Teto no percentil 99, aprendido so no treino."
+  },
   "imputacao": {
     "numericas": "median",
     "categoricas": "most_frequent",
