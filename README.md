@@ -801,7 +801,7 @@ têm numerador e denominador de populações diferentes:
 | Variável | Causa | Extensão |
 |---|---|---|
 | `mun_pct_rural`, `mun_pct_transporte` | Numerador conta matrículas de todas as etapas; denominador, só anos iniciais | Acima de 100% em 1.279 e 1.105 municípios; máximos de 552,6% e 467,0% |
-| `mun_alunos_por_turma`, `mun_alunos_por_docente` | Turmas multisseriadas de áreas indígenas não contam como turma de anos iniciais | Jordão (AC), com 44,7% de população indígena: 109,9 alunos por turma, contra mediana de 20,3 |
+| `mun_alunos_por_turma`, `mun_alunos_por_docente` | Alunos de anos iniciais em escolas que não registram nenhuma turma de anos iniciais — provavelmente turmas multisseriadas, comuns em áreas indígenas e remotas | Jordão (AC), com 44,7% de população indígena: 109,9 alunos por turma, contra mediana de 20,3. Em 123 das 140 linhas de escola do município, há alunos de anos iniciais e nenhuma turma de anos iniciais |
 
 As variáveis continuam crescendo com o fenômeno que medem e funcionam como índice, não como
 percentual. O pipeline aplica um teto no percentil 99 do treino (seção 5), e o efeito nas
