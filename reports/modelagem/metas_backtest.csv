@@ -1,0 +1,14 @@
+﻿,hist_gradient_boosting
+municipios_avaliados,889.0
+observados_abaixo_da_meta,373.0
+previstos_abaixo_da_meta,336.0
+acuracia,0.6861642294713161
+precisao,0.6398809523809523
+recall,0.5764075067024129
+f1,0.6064880112834978
+erro_medio_taxa_pontos,5.779682838602637
+correlacao_prevista_observada,0.8116132435916392
+precisao_top_10,0.9
+precisao_top_25,0.84
+precisao_top_50,0.8
+precisao_top_100,0.8

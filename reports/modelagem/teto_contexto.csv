@@ -1,0 +1,8 @@
+﻿,valor
+alunos,280021
+municipios,1009
+features_que_variam_no_municipio,1 de 29 (caderno)
+variancia_entre_municipios_pct,11.598351510611373
+roc_auc_uma_feature_taxa_ano_anterior,0.6630226830047509
+roc_auc_teto,0.698623672448972
+brier_skill_teto_pct,11.598351510611394

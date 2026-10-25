@@ -15,6 +15,14 @@ fatores que mais influenciam esse resultado.
 Consome a camada Gold construída no [Tech Challenge da Fase 2](https://github.com/luizafcunha/fiap-ai-scientist-fase-02)
 e a enriquece com contexto socioeconômico municipal do Censo Demográfico 2022 e do PIB.
 
+**Em uma leitura.** Os dados públicos de alfabetização são anonimizados: todo aluno de uma
+cidade recebe as mesmas variáveis. Por isso o modelo estima a chance de alfabetização de uma
+criança **naquele contexto**, não de uma criança específica — e nessa pergunta ele acerta. A
+probabilidade prevista fica a cerca de um ponto da observada, separa contextos de 13% a 65% de
+risco e aponta os municípios que ficarão abaixo da meta com 90% de precisão entre os dez
+primeiros. O que nenhum modelo consegue com esses dados é distinguir duas crianças da mesma
+cidade: 88% da variação está aí.
+
 > **Legenda de status:** ✅ concluído · 🚧 em andamento · ⏳ planejado
 > **Entrega:** 3 de novembro de 2026
 
@@ -76,6 +84,15 @@ Classificação, e não regressão sobre a proficiência, porque a decisão de p
 é binária (aluno entra ou não em programa de apoio) e o corte de 743 pontos já é o
 critério oficial de alfabetização — regredir a proficiência adicionaria complexidade sem
 mudar a ação tomada a partir do resultado.
+
+**O aluno provável.** O enunciado pede prever a alfabetização "utilizando variáveis
+educacionais, territoriais e socioeconômicas" — e todas elas descrevem o município, não a
+criança. Alunos da mesma cidade recebem o mesmo vetor de features (seção 7). Por isso o
+modelo estima a **probabilidade de alfabetização para um aluno inserido em determinado
+contexto**: a resposta para "um aluno deste território, desta condição socioeconômica e
+desta condição educacional se alfabetiza?". Para essa pergunta, a métrica central é a
+calibração — quando o modelo diz 40% de risco, cerca de 40% dos alunos daquele contexto de
+fato não se alfabetizam —, reportada ao lado das métricas de classificação.
 
 ---
 
@@ -311,7 +328,7 @@ de dados existe — PIB total de 2023, composição setorial de 2021.
 
 ## 5. Etapas de modelagem
 
-> 🚧 *Pré-processamento e baseline concluídos (S3). Comparação de algoritmos na S4.*
+> ✅ *Pré-processamento, baseline e comparação de algoritmos concluídos.*
 
 **Seleção de features** — [`notebooks/02_selecao_features.ipynb`](notebooks/02_selecao_features.ipynb).
 Das 35 colunas de `features_aluno`, **24 entram no modelo** e 11 ficam de fora, cada uma
@@ -344,31 +361,58 @@ só com o treino de cada rodada:
 | Grupo | Imputação | Transformação |
 |---|---|---|
 | 6 numéricas muito assimétricas (população, densidade, PIB per capita…) | Mediana | `log1p` + padronização |
-| 15 numéricas | Mediana | Padronização |
+| 11 numéricas | Mediana | Padronização |
+| 4 razões do Censo Escolar com valores impossíveis | Mediana | Teto no percentil 99 do treino + padronização |
 | `regiao`, `sigla_uf` | Mais frequente | One-hot |
 | `mun_elegivel_meta` | Constante 0 | — |
 
 **Estratégia de amostragem.** A base completa é usada, sem reamostragem: o alvo é
-relativamente balanceado (59,4% × 40,6%), e a classe de risco recebe mais peso com
-`class_weight="balanced"`.
+relativamente balanceado (59,4% × 40,6%). **Nenhum modelo usa `class_weight`.** O recall-alvo
+da classe de risco é obtido pela escolha do limiar, por validação cruzada — não pelo peso das
+classes. A seção 7 mostra o experimento que levou a essa decisão.
+
+A busca de hiperparâmetros e a escolha do limiar usam uma amostra de até 30 alunos por
+município. As features são municipais, e 1,3 milhão de alunos do treino equivalem a cerca de
+4.400 pontos independentes: a amostra preserva a informação e torna a busca viável.
+
+**Teto nas razões do Censo Escolar.** `mun_alunos_por_turma`, `mun_alunos_por_docente`,
+`mun_pct_rural` e `mun_pct_transporte` têm numerador e denominador de populações diferentes e
+assumem valores impossíveis (seção 10). O teto é aprendido no `fit`, portanto só com o
+treino, e configurado em `limitar_extremos` no JSON de decisões. O efeito nas métricas foi
+nulo — ROC-AUC de 0,6709 com e sem teto na regressão logística, o modelo mais sensível a
+extremos por ser linear. A correção é de consistência, para que o modelo não receba valores
+impossíveis, não de desempenho.
 
 ## 6. Escolha do algoritmo
 
-> ⏳ *A preencher na S4.*
+Quatro algoritmos, avaliados no mesmo conjunto de teste — 1.090 municípios nunca vistos no
+treino —, cada um com o limiar escolhido na validação cruzada para o mesmo recall-alvo de 70%:
 
-| Algoritmo | Por que foi considerado | Resultado |
-|---|---|---|
+| Algoritmo | ROC-AUC | PR-AUC | Recall | Precisão | F1 | Brier |
+|---|---:|---:|---:|---:|---:|---:|
+| HistGradientBoosting | 0,674 | 0,551 | 0,753 | 0,491 | 0,594 | 0,2165 |
+| Random Forest | 0,673 | 0,548 | 0,773 | 0,482 | 0,594 | 0,2170 |
+| Regressão logística | 0,673 | 0,550 | 0,771 | 0,484 | 0,595 | 0,2166 |
+| Árvore de decisão rasa | 0,664 | 0,528 | 0,801 | 0,474 | 0,596 | 0,2181 |
 
-Cobrir a decisão final com o trade-off explícito entre desempenho e interpretabilidade.
-Num contexto de política pública, modelo que acerta mais e não se explica pode ser a
-escolha errada.
+Métricas por aluno, no teste completo; o Brier é medido sem o RS. O recall supera o alvo de
+70% porque o limiar é escolhido com cada município pesando igual e o teste é contado por aluno
+— explicado na seção 7.
+
+**Os quatro empatam.** A diferença de ROC-AUC entre o melhor e o pior é de 0,009, e entre os
+três primeiros, de 0,001 — dentro do que uma nova divisão treino/teste poderia inverter. O F1
+também empata, entre 0,594 e 0,596. Os modelos de árvores não extraem mais sinal que a
+regressão logística, e a seção 7 mostra por quê: o limite está nos dados, não no algoritmo.
+
+**Modelo escolhido: HistGradientBoosting.** Com desempenho equivalente, dois critérios
+competiam. A interpretabilidade favoreceria a regressão logística, cujos coeficientes se leem
+diretamente. Os números absolutos favorecem o HistGradientBoosting, com o melhor ROC-AUC e o
+melhor Brier dos quatro. O grupo escolheu o segundo e trata a interpretabilidade com SHAP, na
+seção 8.
 
 ---
 
 ## 7. Métricas de avaliação
-
-> 🚧 *Baseline avaliado (S3). Curvas ROC e de precisão-recall, e o contraste entre
-> divisão aleatória e por município, na S4 e S6.*
 
 **Métrica prioritária: recall da classe de risco.** O falso negativo, deixar de sinalizar
 uma criança em risco, é o erro mais grave. O recall é acompanhado de precisão e F1, porque
@@ -380,20 +424,258 @@ acurácia não serve sozinha: o modelo que responde sempre "alfabetizado" acerta
 | Modelo | ROC-AUC | Recall | Precisão | F1 | Acurácia |
 |---|---|---|---|---|---|
 | Ingênuo (classe mais comum) | 0,500 | 0,000 | 0,000 | 0,000 | 0,591 |
-| Regressão logística | **0,661** | **0,652** | 0,516 | 0,573 | 0,607 |
+| Regressão logística | **0,661** | 0,393 | 0,580 | 0,462 | 0,634 |
 
-Das 540.192 crianças em risco no treino, a regressão logística encontra 353.852 (65,5%).
-Dos alertas que emite, 51,5% estão corretos, contra 41% se fossem dados ao acaso. Tabela
+No limiar padrão de 0,5, a regressão logística encontra 214.273 das 540.192 crianças em risco
+do treino — 39,7%. Dos alertas que emite, 57,7% estão corretos, contra 41% se fossem dados ao
+acaso. O recall é baixo porque, sem peso nas classes, o modelo só sinaliza quem tem mais de 50%
+de chance de risco; os modelos da seção 6 escolhem o limiar por validação cruzada e levam o
+recall ao alvo. O ROC-AUC, que não depende de limiar, já mostra o poder de separação. Tabela
 completa em [`reports/modelagem/`](reports/modelagem/) e matriz de confusão em
 [`images/matriz_confusao_baseline.png`](images/matriz_confusao_baseline.png).
 
+### O limite está nos dados
+
+Das 29 features de `features_aluno`, **apenas uma varia entre alunos do mesmo município** — o
+`caderno`, descartado por só existir no dia da prova. Todo aluno de uma cidade recebe o mesmo
+vetor de features, e nenhum modelo pode distinguir duas crianças da mesma cidade.
+
+No teste — 280.021 alunos em 1.009 municípios, sem o RS —, a variação do alvo se divide assim:
+
+| Onde está a variação | Fração |
+|---|---:|
+| Entre municípios — alcançável pelas features | 11,6% |
+| Dentro de cada município — inalcançável | 88,4% |
+
+Para medir o que esse limite permite, imaginamos o melhor previsor possível com informação
+municipal: um que soubesse a taxa real de 2024 de cada município. Ele não existe, mas define
+o teto de qualquer modelo construído com estes dados.
+
+### Duas medidas, dois tetos
+
+O modelo responde a duas perguntas diferentes, e cada uma tem sua métrica.
+
+| O que se mede | Métrica | Modelo | Teto | Alcançado |
+|---|---|---:|---:|---:|
+| Ordenar alunos por risco | ROC-AUC | 0,674 | 0,699 | 87% |
+| Acertar a probabilidade | Brier skill | 8,9% | 11,6% | 76% |
+
+"Alcançado" é a fração do ganho possível que o modelo obtém: sobre o acaso, no ROC-AUC; sobre
+prever sempre a média, no Brier.
+
+**Na ordenação, o modelo está perto do teto.** Uma única feature, a taxa do ano anterior, dá
+0,663; o modelo completo, 0,674; o melhor possível, 0,699. Outro algoritmo ou mais busca de
+hiperparâmetros disputam no máximo 0,025 — e a seção 6 mostra que os quatro modelos empatam.
+
+O teto do Brier, 11,6%, coincide com a variação entre municípios, 11,6%. Não por acaso: o
+melhor previsor municipal elimina exatamente a parte da variação que está entre os municípios,
+e nada da que está dentro deles. Duas métricas independentes chegam ao mesmo limite.
+
+### Calibração
+
+Verificada em [`src/evaluation/calibracao.py`](src/evaluation/calibracao.py), sobre as
+probabilidades gravadas pelos notebooks. **As probabilidades saem calibradas de origem**, sem
+correção posterior:
+
+| Modelo | Erro de calibração | Brier | Risco médio previsto | Risco observado |
+|---|---:|---:|---:|---:|
+| HistGradientBoosting | 0,87 | 0,2165 | 38,4% | 38,8% |
+| Regressão logística | 0,70 | 0,2166 | 38,4% | 38,8% |
+| Random Forest | 1,40 | 0,2170 | 38,9% | 38,8% |
+| Árvore de decisão rasa | 0,85 | 0,2181 | 38,9% | 38,8% |
+
+Erro de calibração em pontos percentuais: a distância média entre o risco previsto e o
+observado, ponderada pelos alunos de cada faixa. Teste sem RS, 280.021 alunos.
+
+Por decil de risco previsto, no HistGradientBoosting:
+
+| Decil de risco previsto | Previsto | Observado |
+|---|---:|---:|
+| 1 — contextos mais favoráveis | 15,3% | 13,1% |
+| 5 | 36,8% | 37,3% |
+| 10 — contextos mais adversos | 62,2% | 64,8% |
+
+**86,9% das crianças se alfabetizam nos contextos mais favoráveis; 35,2%, nos mais adversos.**
+Diagrama de confiabilidade em [`images/calibracao_teste.png`](images/calibracao_teste.png).
+
+### Por que os modelos não usam `class_weight`
+
+Os quatro modelos foram construídos inicialmente com `class_weight="balanced"`, para priorizar
+o recall da classe de risco. O peso faz o modelo aprender como se metade dos alunos estivesse
+em risco, quando a taxa real é de cerca de 39%. O experimento em
+[`src/evaluation/experimento_class_weight.py`](src/evaluation/experimento_class_weight.py)
+treina cada modelo com e sem o peso, na mesma amostra, e compara no mesmo teste:
+
+| Modelo | ROC-AUC com peso | sem peso | Risco médio previsto com peso | sem peso |
+|---|---:|---:|---:|---:|
+| Regressão logística | 0,671 | 0,671 | 50,2% | 38,5% |
+| Árvore de decisão rasa | 0,657 | 0,658 | 49,2% | 38,1% |
+| Random Forest | 0,672 | 0,673 | 50,5% | 39,2% |
+| HistGradientBoosting | 0,673 | 0,672 | 50,2% | 38,7% |
+
+Risco observado no teste: 38,8%.
+
+**O peso não melhora a ordenação** — o ROC-AUC fica igual nos quatro —, e o recall-alvo pode
+ser obtido só pela escolha do limiar. **E distorce as probabilidades**: com ele, todo modelo
+prevê risco médio de cerca de 50%, o mundo balanceado que aprendeu; o erro de calibração passa
+de 10 pontos.
+
+Uma primeira versão do projeto mantinha o peso e corrigia as probabilidades depois do treino,
+com uma correção analítica de prior. Funcionava, mas consertava um problema que o desenho mais
+simples não cria. O peso foi retirado, e o histórico do repositório registra as duas versões.
+Gráfico em [`images/experimento_class_weight.png`](images/experimento_class_weight.png).
+
+### Validação e teste
+
+A busca de hiperparâmetros e o limiar são escolhidos na amostra de até 30 alunos por município,
+em que cada cidade pesa quase igual. O teste da seção 6 é contado por aluno, e os municípios
+grandes pesam mais. Medir o teste dos dois jeitos, em
+[`src/evaluation/otimizacao.py`](src/evaluation/otimizacao.py), separa o que é perda de
+generalização do que é forma de contar:
+
+| Medida | Contagem | ROC-AUC | Recall no limiar | Risco |
+|---|---|---:|---:|---:|
+| Validação cruzada da busca | Até 30 por município | 0,686 | — | 37,3% |
+| Teste | Até 30 por município | 0,681 | 70,5% | 37,0% |
+| Teste | Todos os alunos | 0,674 | 75,3% | 39,3% |
+
+**Contado do mesmo jeito, o modelo generaliza.** A perda entre validação e teste é de 0,005 —
+o otimismo normal de escolher a melhor de doze configurações —, e o limiar acerta o alvo de 70%
+de recall.
+
+**Contado por aluno, os números mudam por outro motivo.** Os municípios grandes têm mais risco,
+39,3% contra 37,0%, e passam a pesar mais. O ROC-AUC cai, porque o modelo é mais fraco nas
+cidades grandes (seções 8 e 9), e o recall sobe para 75%: o limiar sinaliza 60% dos alunos do
+teste.
+
+**A configuração escolhida não está em overfitting.** A busca foi plana — doze configurações
+entre 0,684 e 0,686 — e escolheu árvores de profundidade 3, taxa de aprendizado de 0,03 e 300
+iterações. Na curva dessa configuração, o pico da validação ocorre em 400 árvores, e as 300
+escolhidas ficam a 0,0003 dele, com distância de 0,008 entre treino e validação. O notebook 05
+mostra o overfitting com uma configuração agressiva, de propósito; a curva da configuração
+escolhida está em [`images/hgb_curva_iteracoes_final.png`](images/hgb_curva_iteracoes_final.png).
+
 ## 8. Interpretação dos resultados
 
-> ⏳ *A preencher na S6.*
+Interpretação do HistGradientBoosting com SHAP, em
+[`src/evaluation/interpretacao.py`](src/evaluation/interpretacao.py). Os valores estão em
+log-odds da classe de risco: positivo aumenta a chance de a criança não se alfabetizar.
 
-Feature Importance e SHAP. A leitura precisa ser causalmente honesta: o modelo mostra
-associação, não efeito. Infraestrutura escolar aparecer como relevante não prova que
-construir bibliotecas alfabetiza.
+### Duas perguntas diferentes
+
+O SHAP responde **o que o modelo usa para prever**. O enunciado pergunta outra coisa: **quais
+fatores mais impactam a alfabetização**. As respostas não coincidem, e a diferença entre elas é
+o achado principal desta seção.
+
+### O que o modelo usa: o ano anterior
+
+No modelo completo, `mun_taxa_ano_anterior` domina, seguida de `mun_distancia_meta_anterior` —
+que é a própria taxa de 2023 menos a meta. O município que alfabetizou bem em 2023 tende a
+alfabetizar bem em 2024.
+
+É informação legítima, disponível antes da avaliação. E é inútil como resposta para um gestor:
+persistência não é alavanca de política.
+
+### O que o contexto explica: retirando o passado
+
+O mesmo modelo foi treinado sem as duas variáveis de histórico:
+
+| | ROC-AUC | Ganho sobre o acaso |
+|---|---:|---:|
+| Com histórico | 0,672 | 0,172 |
+| Sem histórico | 0,649 | 0,149 — 86% do anterior |
+
+**Retirar o passado custa apenas 0,023 de ROC-AUC.** O contexto sozinho recupera 86% do poder
+preditivo, porque o resultado do ano anterior não traz informação nova: é um resumo compacto do
+próprio contexto. É por isso que as variáveis socioeconômicas não apareciam no topo do SHAP —
+não por não importarem, mas por já estarem contidas na taxa de 2023.
+
+A conclusão é robusta ao modelo: a análise "sem inércia" do notebook 04, com a Random Forest,
+chega ao mesmo resultado — de 0,672 para 0,647. Os dois modelos desta seção são treinados como
+o de produção, com até 30 alunos por município, e interpretados sobre alunos de fora do RS,
+pelo motivo explicado abaixo.
+
+### Os fatores de contexto, em ordem
+
+| Variável | Peso | Relação com o risco |
+|---|---:|---|
+| UF | 0,292 | Varia por estado — ver abaixo |
+| Índice de envelhecimento | 0,075 | Mais envelhecido, menos risco |
+| Moradores por domicílio | 0,064 | Mais adensado, mais risco |
+| Região | 0,044 | — |
+| Total de escolas | 0,044 | Maior, mais risco |
+| População | 0,034 | Maior, mais risco |
+| Peso da administração pública no PIB | 0,031 | Maior, mais risco |
+| Alfabetização adulta | 0,028 | Maior, menos risco |
+| Tempo integral | 0,024 | Maior, menos risco |
+
+Peso é o |SHAP| médio do modelo sem histórico. As colunas de UF e de região são somadas por
+aluno antes do valor absoluto — sem isso, a UF apareceria fragmentada em 27 pesos pequenos e
+pareceria irrelevante. Lista completa, com o modelo completo ao lado, em
+[`reports/modelagem/interpretacao_ranking.csv`](reports/modelagem/interpretacao_ranking.csv);
+gráfico em [`images/interpretacao_comparacao.png`](images/interpretacao_comparacao.png).
+
+Três leituras:
+
+- **A condição das famílias pesa.** Domicílios mais adensados, menor alfabetização adulta e
+  economia dependente da administração pública — sinais de vulnerabilidade — aumentam o risco.
+  O índice de envelhecimento provavelmente indica o estágio da transição demográfica, mais
+  avançada nas regiões mais desenvolvidas, e não um efeito da idade em si.
+- **A escala pesa contra.** Municípios maiores têm mais risco — o mesmo padrão encontrado de
+  forma independente nos grupos da seção 9, onde o urbano mais rico alfabetiza menos que o
+  interior estruturado.
+- **Da escola, só o tempo integral.** É a única variável escolar com peso relevante, associada
+  a menos risco. A infraestrutura, frequentemente apontada como prioridade, pesa pouco quando o
+  contexto do município já é conhecido: 0,007.
+
+### A UF: o que o contexto não explica
+
+Sem o histórico, a UF é o fator mais forte — e seu efeito aparece **depois** de o modelo já
+conhecer o contexto socioeconômico de cada município:
+
+| UF | Efeito | Leitura |
+|---|---:|---|
+| Ceará | −1,31 | Muito menos risco do que o contexto indicaria |
+| Goiás | −0,42 | Menos risco |
+| Espírito Santo | −0,40 | Menos risco |
+| Minas Gerais | −0,23 | Menos risco |
+| Rio Grande do Norte | +0,67 | Mais risco |
+| Sergipe | +0,71 | Mais risco |
+| Bahia | +0,88 | Muito mais risco |
+
+SHAP médio da coluna de cada UF entre os seus próprios alunos, em log-odds de risco. Tabela
+completa em [`reports/modelagem/interpretacao_uf.csv`](reports/modelagem/interpretacao_uf.csv).
+
+**O maior contraste está dentro de uma mesma região.** Ceará e Bahia são do Nordeste, com
+contextos socioeconômicos parecidos, e ficam nos extremos opostos: o efeito do Ceará multiplica
+a chance de risco por cerca de 0,27; o da Bahia, por cerca de 2,4.
+
+Duas explicações são possíveis, e os dados não separam uma da outra:
+
+- **Política estadual.** O Ceará mantém desde 2007 um programa de alfabetização em colaboração
+  com os municípios, o PAIC. O efeito é coerente com ele.
+- **Medição.** O indicador vem de avaliações aplicadas pelos sistemas estaduais e alinhadas
+  nacionalmente. Diferenças entre esses sistemas também apareceriam como efeito de UF.
+
+### O Rio Grande do Sul
+
+O modelo de produção é treinado com o RS, e `sigla_uf_RS` aparece como a terceira variável mais
+importante do SHAP do notebook 05, aumentando o risco. A queda do estado em 2024 tem duas
+explicações compatíveis com os dados: uma alteração na origem da medição, apontada na Fase 2, ou
+as enchentes que fecharam escolas por semanas, levantadas no notebook 02. Nas duas, é um choque
+de 2024, não uma característica educacional estável do estado.
+
+O grupo decidiu manter o RS na base — excluí-lo removeria justamente os alunos de maior risco,
+se o efeito for real —, e a análise de sensibilidade do notebook 04 sustenta a decisão: treinar
+com ou sem o estado dá o mesmo ROC-AUC nos demais. A interpretação desta seção é calculada
+sobre alunos de fora do RS, para que o choque não se misture aos fatores de contexto.
+
+### Leitura causal, não
+
+O SHAP mostra o que o modelo usa, não o que causa a alfabetização. Tempo integral associado a
+menos risco não prova que ampliá-lo alfabetiza: municípios que o oferecem podem diferir em
+outras coisas que o modelo não vê. O valor desta seção é apontar onde olhar, não prescrever o
+que fazer.
 
 ---
 
@@ -414,7 +696,55 @@ A EDA da Fase 3 (`notebooks/01_eda.ipynb`), já no grão do aluno, confirma e re
   país — decidir incluir, marcar ou excluir essas linhas fica para a modelagem
 - Nulos pequenos (até 2,6%) em 8 colunas de contexto municipal, a tratar por imputação
 
-> ⏳ *Aprofundar na S6 e S7, com Feature Importance e SHAP.*
+### Regiões com padrões semelhantes
+
+Resposta à pergunta de negócio do enunciado, em
+[`src/modeling/clusterizacao.py`](src/modeling/clusterizacao.py). K-Means sobre o **contexto**
+dos municípios — socioeconômico, educacional e territorial —, com a taxa de alfabetização
+usada **só depois**, para descrever cada grupo. Agrupar pelo resultado tornaria tautológica
+a conclusão de que contextos parecidos têm resultados parecidos.
+
+O número de grupos foi escolhido pela silhueta, máxima em k = 4 — mas baixa, 0,188, e a
+curva de inércia não tem cotovelo. Os contextos municipais formam um contínuo, não grupos
+nítidos: os quatro grupos servem como tipologia, não como separação natural.
+
+| Grupo | Municípios | Alunos | Alfabetização | Perfil |
+|---|---:|---:|---:|---|
+| 1 | 335 | 96.769 | 49,2% | Rural isolado, menor infraestrutura e densidade |
+| 2 | 1.783 | 269.329 | 59,2% | Menor PIB e menor alfabetização adulta; mais tempo integral |
+| 3 | 1.252 | 1.091.654 | 59,5% | Urbano, maior PIB, alfabetização adulta e infraestrutura |
+| 4 | 2.080 | 153.002 | 71,9% | Interior estruturado, turmas menores |
+
+Taxa ponderada pelos alunos, sem o RS.
+
+**O grupo urbano mais rico alfabetiza menos que o interior estruturado.** O grupo 3 tem o
+melhor contexto em quase tudo — PIB per capita mediano de R$ 48 mil, 95,4% de alfabetização
+adulta — e chega a 59,5%. O grupo 4, com contexto um pouco inferior, alcança 71,9%. São doze
+pontos contra o contexto, no grupo que concentra 1,09 milhão dos 1,6 milhão de alunos. A
+capital paulista, maior município do grupo 3, alfabetiza 48,5%.
+
+**O grupo do Nordeste empata com as grandes cidades com o pior contexto.** O grupo 2 tem o
+menor PIB per capita mediano, R$ 14,9 mil, e a menor alfabetização adulta, 79,4% — e chega
+aos mesmos 59,2% do grupo urbano. É também o grupo com mais tempo integral, 20,6% das
+matrículas.
+
+| Região | Grupo 1 | Grupo 2 | Grupo 3 | Grupo 4 |
+|---|---:|---:|---:|---:|
+| Centro-Oeste | 11% | 4% | 22% | 63% |
+| Nordeste | 4% | 84% | 9% | 2% |
+| Norte | 43% | 25% | 9% | 23% |
+| Sudeste | 0% | 9% | 39% | 51% |
+| Sul | 1% | 0% | 28% | 71% |
+
+Sul, Sudeste e Centro-Oeste se distribuem pelos mesmos grupos e têm padrões semelhantes. O
+Nordeste é o mais homogêneo, com 84% dos municípios num grupo só. O Norte é o mais
+heterogêneo, espalhado por três grupos.
+
+**Leitura causal, não.** O grupo 4 tem as menores turmas — 18,2 alunos, contra 22,2 no grupo
+3 —, e é tentador atribuir a diferença a isso. O agrupamento mostra associação; a explicação
+exigiria outro desenho de estudo. Projeção em
+[`images/clusters_pca.png`](images/clusters_pca.png) e escolha de k em
+[`images/clusters_silhueta.png`](images/clusters_silhueta.png).
 
 ---
 
@@ -431,16 +761,26 @@ costuma explicar bastante em educação. Mas a causa é legítima, e o projeto r
 proteção de privacidade em vez de contorná-la. O contexto escolar entra agregado por
 município, em `mun_indice_infraestrutura` e `mun_alunos_por_docente`.
 
+**Fontes alternativas foram buscadas e descartadas.** O Indicador de Nível Socioeconômico
+(INSE) do INEP, construído a partir do questionário do Saeb, seria a candidata ideal, mas
+está no grão da escola e não pode ser ligado aos alunos avaliados. Também foi testado se o
+código sintético da escola se mantinha entre 2023 e 2024, o que permitiria usar o resultado
+da escola no ano anterior: das 36.462 escolas com o mesmo código nos dois anos, **35.597
+estavam em municípios diferentes** — o código é regenerado a cada ano, e a coincidência é
+de numeração, não de escola. A anonimização decorre da política do INEP de proteção de
+dados, em observância à LGPD.
+
 **Cobertura temporal de dois anos.** A avaliação cobre 2023 e 2024. Dois pontos sustentam
 comparação, não tendência.
 
 **Defasagem das fontes econômicas.** O PIB total é de 2023 e a composição setorial de
 2021, contra a avaliação de 2024. Riqueza municipal muda devagar, mas a defasagem existe.
 
-**Anomalia do Rio Grande do Sul.** Documentada na Fase 2: 89,6% dos municípios gaúchos
-com queda, mediana de −19,8, deslocamento uniforme que indica alteração na origem do
-dado. As 61.053 linhas do estado são marcadas com `uf_anomala`, não removidas — a decisão
-de excluí-las é de quem modela.
+**Queda do Rio Grande do Sul em 2024.** Documentada na Fase 2: 89,6% dos municípios gaúchos
+com queda, mediana de −19,8 pontos, deslocamento uniforme. Duas explicações são compatíveis com
+os dados — alteração na origem da medição ou o efeito das enchentes de 2024, que suspenderam
+aulas por semanas —, e os dados disponíveis não separam uma da outra. As 61.053 linhas do estado
+ficam no treino, por decisão do grupo, e fora das avaliações e da interpretação (seções 7 e 8).
 
 **Pseudo-replicação das variáveis municipais.** Tamanho efetivo de amostra de 5.450 para
 features municipais, contra 1,6 milhão de linhas.
@@ -450,27 +790,73 @@ industrial negativo de −477 milhões em 2021 — provável ajuste contábil do
 proporções ficam nulas em vez de inverter de sinal.
 
 **Features quase todas municipais.** Das 24 features, nenhuma descreve o aluno: crianças
-do mesmo município recebem praticamente a mesma previsão. O modelo ranqueia municípios
-mais do que alunos, o que limita o poder de separação (ROC-AUC de 0,66 no baseline).
+do mesmo município recebem a mesma previsão. Como 88% da variação do alvo está dentro dos
+municípios, o ROC-AUC tem teto de 0,699 com qualquer conjunto de features municipais
+(seção 7). O modelo responde bem à probabilidade para o aluno de um contexto; não distingue
+crianças da mesma cidade.
 
-**Percentuais acima de 100%.** `mun_pct_rural` e `mun_pct_transporte` passam de 100% em
-1.279 (23%) e 1.105 (20%) municípios, com máximos de 552,6% e 467,0%. A frequência indica
-erro no cálculo dessas colunas; foram mantidas no baseline, e a interpretação delas deve
-ser feita com cautela.
+**Razões do Censo Escolar com valores impossíveis.** Quatro variáveis herdadas da Fase 2
+têm numerador e denominador de populações diferentes:
+
+| Variável | Causa | Extensão |
+|---|---|---|
+| `mun_pct_rural`, `mun_pct_transporte` | Numerador conta matrículas de todas as etapas; denominador, só anos iniciais | Acima de 100% em 1.279 e 1.105 municípios; máximos de 552,6% e 467,0% |
+| `mun_alunos_por_turma`, `mun_alunos_por_docente` | Turmas multisseriadas de áreas indígenas não contam como turma de anos iniciais | Jordão (AC), com 44,7% de população indígena: 109,9 alunos por turma, contra mediana de 20,3 |
+
+As variáveis continuam crescendo com o fenômeno que medem e funcionam como índice, não como
+percentual. O pipeline aplica um teto no percentil 99 do treino (seção 5), e o efeito nas
+métricas foi nulo — a amostragem de até 30 alunos por município já limitava o peso de casos
+como Jordão. A correção na origem fica pendente.
+
 ---
 
 ## 11. Aplicação prática para políticas públicas
 
-> ⏳ *A preencher na S7.*
+### Municípios que podem não atingir a meta
 
-**Ressalva de uso responsável**, a desenvolver: predição individual sobre crianças tem
-risco de estigmatização. O uso legítimo é alocar apoio, não rotular aluno.
+Resposta à pergunta de negócio do enunciado, em
+[`src/evaluation/metas_municipios.py`](src/evaluation/metas_municipios.py). Como as features
+são do município, a média das probabilidades dos alunos de uma cidade estima a taxa de
+alfabetização daquela cidade — e, comparada com a meta pactuada, indica quem tende a ficar
+abaixo. A estimativa exige probabilidades certas em valor, não só em ordem, e é por isso que a
+calibração da seção 7 importa aqui.
+
+**Backtest.** O modelo usa contexto de 2023 para prever 2024, então a previsão pode ser
+conferida contra o que de fato aconteceu. Em 889 municípios do teste — nunca vistos no
+treino, sem RS, com meta publicada e ao menos 30 alunos avaliados:
+
+| Medida | Valor |
+|---|---:|
+| Correlação entre taxa prevista e observada | 0,812 |
+| Erro médio da taxa | 5,8 pontos |
+| Municípios de fato abaixo da meta | 373 (42%) |
+| Municípios previstos abaixo da meta | 336 |
+| Precisão nos 10 de maior risco previsto | 90% |
+| Precisão nos 50 de maior risco | 80% |
+| Precisão nos 100 de maior risco | 80% |
+
+A acurácia geral, de 68,6%, subestima o que importa. Perto da meta, poucos pontos invertem
+a classificação, e é ali que se concentram os erros. Um gestor não usa a lista inteira:
+prioriza o topo, onde o acerto dobra a taxa-base de 42%. O número de municípios previstos
+abaixo da meta, 336, fica perto dos 373 reais — consequência direta de as probabilidades
+estarem calibradas. Gráfico em
+[`images/metas_backtest_municipios.png`](images/metas_backtest_municipios.png).
+
+**Para metas futuras**, o mesmo procedimento se aplica com o contexto de 2024 para projetar
+2025. O backtest é o que dá confiança para usá-lo adiante.
+
+### Uso responsável
+
+O modelo estima a probabilidade para o aluno de um contexto, não o destino de uma criança.
+Usá-lo para rotular alunos seria um erro de interpretação, além de um risco de
+estigmatização. O uso legítimo é **alocar apoio a territórios e redes**, onde a estimativa é
+calibrada e o ranking de municípios tem precisão demonstrada.
 
 ---
 
 ## 12. Possíveis evoluções futuras
 
-> ⏳ *A preencher na S7.*
+> 🚧 *Em construção.*
 
 Candidatos já identificados:
 
@@ -478,7 +864,12 @@ Candidatos já identificados:
 - **MUNIC — Pesquisa de Informações Básicas Municipais** (IBGE): capacidade institucional
   da prefeitura. Avaliada e adiada por custo de exploração — 306 colunas e edições de
   anos distintos
-- Features no grão da escola, se surgir chave que ligue a avaliação ao Censo Escolar
+- **INSE e indicadores no grão da escola**, se a anonimização permitir ligá-los aos alunos
+  avaliados — é o único caminho identificado para romper o teto de 0,699 de ROC-AUC
+- **Correção na origem das razões do Censo Escolar**, com numerador e denominador da mesma
+  etapa
+- **Limiar escolhido por aluno**, ponderando cada município pelo número de alunos na escolha
+  do limiar, para que o recall-alvo valha na mesma unidade em que o teste é reportado
 - Reaprendizado periódico e publicação do modelo como serviço
 
 ---
@@ -658,10 +1049,20 @@ cada execução do EDA:
 aws s3 cp s3://<bucket>/fase3/gold/features_aluno/ data/sample/features_aluno/ --recursive
 ```
 
-**6. Construir o dataset de modelagem** ⏳
+**6. Treinar e avaliar os modelos** — notebooks `03` a `06`, que gravam métricas e
+probabilidades de teste em `reports/modelagem/`.
+
+**7. Avaliação, interpretação e agrupamentos** — sobre as probabilidades gravadas pelos
+notebooks; os módulos de experimento, otimização e interpretação treinam suas próprias versões
+do modelo, na amostra de até 30 alunos por município:
 
 ```bash
-# python src/preprocessing/dataset.py
+python -m src.evaluation.experimento_class_weight  # por que os modelos não usam class_weight
+python -m src.evaluation.calibracao                # calibração e teto dos dados
+python -m src.evaluation.otimizacao                # curva da configuração final e validação x teste
+python -m src.evaluation.metas_municipios          # backtest das metas por município
+python -m src.evaluation.interpretacao             # SHAP com e sem histórico
+python -m src.modeling.clusterizacao               # grupos de municípios por contexto
 ```
 
 ### Consultas analíticas
@@ -732,8 +1133,8 @@ principal — não é necessário instalar nada à parte.
 │   ├── ingestion/    # busca, exploracao, extracao e sincronizacao
 │   ├── preprocessing/# pipeline de transformacao para ML
 │   ├── transformation/ # Glue Job da Gold
-│   ├── modeling/     # treino, otimizacao, selecao
-│   ├── evaluation/   # metricas, SHAP, comparacao
+│   ├── modeling/     # treino, otimizacao, selecao e clusterizacao
+│   ├── evaluation/   # metricas, SHAP, calibracao, metas, interpretacao e otimizacao
 │   └── visualization/# graficos reutilizaveis
 ├── tests/
 ├── requirements.txt
@@ -789,13 +1190,17 @@ contexto perdido amanhã.
 | Print — crawler com partição reconhecida | `images/` | ⏳ |
 | Print — Glue Job da Gold concluído | `images/` | ⏳ |
 | Notebook de EDA com saídas | [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb) | ✅ |
-| Notebook de modelagem | `notebooks/` | ⏳ |
-| Matriz de confusão e curva ROC | `images/` | ⏳ |
-| Gráficos SHAP | `images/` | ⏳ |
+| Notebooks de modelagem | [`notebooks/03`](notebooks/03_modelagem_supervisionada.ipynb) a [`06`](notebooks/06_arvore_decisao.ipynb) | ✅ |
+| Matriz de confusão e curva ROC | [`images/hgb_avaliacao_teste.png`](images/hgb_avaliacao_teste.png) | ✅ |
+| Gráficos SHAP | [`images/hgb_shap_summary.png`](images/hgb_shap_summary.png) | ✅ |
+| Experimento com e sem `class_weight` | [`images/experimento_class_weight.png`](images/experimento_class_weight.png) | ✅ |
+| Calibração das probabilidades | [`images/calibracao_teste.png`](images/calibracao_teste.png) | ✅ |
+| Curva da configuração escolhida | [`images/hgb_curva_iteracoes_final.png`](images/hgb_curva_iteracoes_final.png) | ✅ |
+| Backtest das metas por município | [`images/metas_backtest_municipios.png`](images/metas_backtest_municipios.png) | ✅ |
+| Agrupamento de municípios | [`images/clusters_pca.png`](images/clusters_pca.png) | ✅ |
+| Fatores com e sem histórico | [`images/interpretacao_comparacao.png`](images/interpretacao_comparacao.png) | ✅ |
 | Relatório técnico | `reports/` | ⏳ |
 | Vídeo executivo (até 5 min) | — | ⏳ |
-| Notebook de modelagem | [`notebooks/03_modelagem_supervisionada.ipynb`](notebooks/03_modelagem_supervisionada.ipynb) | 🚧 |
-| Matriz de confusão e curva ROC | [`images/matriz_confusao_baseline.png`](images/matriz_confusao_baseline.png) | 🚧 |
 
 A primeira delas é a que comprova a correção apontada na avaliação da Fase 2: a partição
 por data de ingestão é reconhecida pelo Glue e consultável no Athena, então cargas
@@ -812,10 +1217,11 @@ anteriores coexistem em vez de serem sobrescritas.
 | S1 | 14–20/set | Gold no grão do aluno, com vazamento tratado | ✅ |
 | S2 | 21–27/set | EDA | ✅ |
 | S3 | 28/set–04/out | Pré-processamento e baseline | ✅ |
-| S4 | 05–11/out | Modelagem — algoritmos comparados | ⏳ |
-| S5 | 12–18/out | Otimização de hiperparâmetros | ⏳ |
-| S6 | 19–25/out | Avaliação e interpretabilidade | ⏳ |
-| S7 | 26–30/out | Clusterização, negócio e documentação | ⏳ |
+| S4 | 05–11/out | Modelagem — algoritmos comparados | ✅ |
+| S5 | 12–18/out | Otimização de hiperparâmetros | ✅ |
+| S6 | 19–25/out | Avaliação, calibração e interpretabilidade | ✅ |
+| S7 | 26–30/out | Clusterização e perguntas de negócio | ✅ |
+| S7 | 26–30/out | Documentação e vídeo executivo | 🚧 |
 | — | 31/out–03/nov | Margem para revisão | ⏳ |
 
 ---

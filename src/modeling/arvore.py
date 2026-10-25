@@ -14,6 +14,6 @@ GRADE_BUSCA = {
 
 
 def criar_pipeline_arvore(decisoes: dict, **params) -> Pipeline:
-    """Imputação + one-hot (sem escala) + DecisionTreeClassifier (class_weight='balanced')."""
+    """Imputação + one-hot (sem escala) + DecisionTreeClassifier."""
     return Pipeline([("pre", criar_preprocessador_sem_escala(decisoes)),
                      ("modelo", criar_modelo("arvore_rasa", **params))])

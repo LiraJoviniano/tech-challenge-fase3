@@ -9,11 +9,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, OneToOneFeatureMixin, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.utils.validation import check_is_fitted
 
 RAIZ = Path(__file__).resolve().parents[2]
 CAMINHO_GOLD = RAIZ / "data" / "sample" / "features_aluno"
@@ -76,9 +78,49 @@ def sem_rs(X, y, grupos):
     return X[mascara], y[mascara], grupos[mascara]
 
 
+class LimitarExtremos(OneToOneFeatureMixin, TransformerMixin, BaseEstimator):
+    """Limita cada coluna ao percentil superior aprendido no treino.
+
+    Existe para razões do Censo Escolar cujo numerador e denominador vêm de populações
+    diferentes, e que por isso assumem valores impossíveis — ver `limitar_extremos` no JSON.
+
+    O teto é calculado em `fit`, portanto só com os dados de treino: calcular no conjunto
+    inteiro deixaria o teste influenciar o pré-processamento. Só o limite superior é aplicado,
+    porque as razões são não negativas e o problema está nos valores altos.
+    """
+
+    def __init__(self, percentil_superior: float = 0.99):
+        self.percentil_superior = percentil_superior
+
+    def fit(self, X, y=None):
+        X = np.asarray(X, dtype=float)
+        self.teto_ = np.nanquantile(X, self.percentil_superior, axis=0)
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self, "teto_")
+        return np.minimum(np.asarray(X, dtype=float), self.teto_)
+
+
+def separar_limitadas(decisoes: dict, grupo: str) -> tuple:
+    """Divide um grupo de features entre as que recebem teto e as demais."""
+    config = decisoes.get("limitar_extremos", {})
+    marcadas = set(config.get("colunas", []))
+    limitadas = [c for c in decisoes[grupo] if c in marcadas]
+    demais = [c for c in decisoes[grupo] if c not in marcadas]
+    return limitadas, demais, config.get("percentil_superior", 0.99)
+
+
 def criar_preprocessador(decisoes: dict) -> ColumnTransformer:
-    """Imputação + transformação por grupo de feature. Sempre dentro de um Pipeline."""
+    """Imputação + transformação por grupo de feature. Sempre dentro de um Pipeline.
+
+    As colunas listadas em `limitar_extremos` ganham um teto antes da padronização. Sem ele,
+    um valor a 18 desvios-padrão — Jordão (AC), com 109,9 alunos por turma — pesaria no
+    coeficiente da regressão logística, que é linear.
+    """
     imp = decisoes["imputacao"]
+    limitadas, padrao, percentil = separar_limitadas(decisoes, "numericas_padrao")
     numericas_log = Pipeline([
         ("imputar", SimpleImputer(strategy=imp["numericas"])),
         ("log", FunctionTransformer(np.log1p, feature_names_out="one-to-one")),
@@ -88,6 +130,11 @@ def criar_preprocessador(decisoes: dict) -> ColumnTransformer:
         ("imputar", SimpleImputer(strategy=imp["numericas"])),
         ("padronizar", StandardScaler()),
     ])
+    numericas_limitadas = Pipeline([
+        ("imputar", SimpleImputer(strategy=imp["numericas"])),
+        ("limitar", LimitarExtremos(percentil_superior=percentil)),
+        ("padronizar", StandardScaler()),
+    ])
     categoricas = Pipeline([
         ("imputar", SimpleImputer(strategy=imp["categoricas"])),
         ("one_hot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
@@ -95,7 +142,8 @@ def criar_preprocessador(decisoes: dict) -> ColumnTransformer:
     binarias = SimpleImputer(strategy="constant", fill_value=imp["binarias_valor"])
     return ColumnTransformer([
         ("num_log", numericas_log, decisoes["numericas_log"]),
-        ("num", numericas, decisoes["numericas_padrao"]),
+        ("num", numericas, padrao),
+        ("num_lim", numericas_limitadas, limitadas),
         ("cat", categoricas, decisoes["categoricas"]),
         ("bin", binarias, decisoes["binarias"]),
     ])
