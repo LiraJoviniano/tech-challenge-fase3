@@ -4,6 +4,6 @@
     "max_depth": 5,
     "min_samples_leaf": 0.01
   },
-  "limiar": 0.48604355572451635,
+  "limiar": 0.34718138821424005,
   "meta_recall": 0.7
 }
