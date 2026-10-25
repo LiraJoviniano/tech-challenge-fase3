@@ -9,7 +9,7 @@ def regras_da_arvore(pipeline, conjuntos: dict, casas: int = 2) -> pd.DataFrame:
     `pipeline` = Pipeline([("pre", pré-processador sem escala), ("modelo", árvore)]) já ajustado.
     `conjuntos` = {"treino": (X, y, grupos), "teste": (X, y, grupos)}; y = 1 é não alfabetizado.
     A taxa de risco é a fração REAL de alunos não alfabetizados naquela folha (não a probabilidade
-    ponderada pelo class_weight), então dá para comparar treino e teste.
+    ponderada pela amostra), então dá para comparar treino e teste.
     """
     pre, arvore = pipeline.named_steps["pre"], pipeline.named_steps["modelo"]
     brutos = list(pre.get_feature_names_out())

@@ -1,6 +1,9 @@
 """Catálogo dos modelos, espaços de busca e amostragem por município.
 
-Todos usam class_weight="balanced" (a métrica prioritária é o recall da classe de risco).
+Nenhum usa class_weight. O peso balanceado foi testado e retirado: não melhorou a ordenação
+(ROC-AUC idêntico) e distorcia as probabilidades, superestimando o risco. O recall-alvo da classe
+de risco é garantido pelo limiar, escolhido por validação cruzada — ver
+`src/evaluation/experimento_class_weight.py`.
 """
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
@@ -12,16 +15,16 @@ from src.preprocessing.pipeline import RANDOM_STATE, criar_preprocessador
 
 # Parâmetros-base de cada modelo; `criar_modelo(nome, **params)` sobrescreve o que for passado.
 _BASE = {
-    "regressao_logistica": (LogisticRegression, dict(max_iter=1000, class_weight="balanced")),
+    "regressao_logistica": (LogisticRegression, dict(max_iter=1000)),
     "arvore_rasa": (DecisionTreeClassifier, dict(
-        max_depth=5, min_samples_leaf=200, class_weight="balanced", random_state=RANDOM_STATE)),
+        max_depth=5, min_samples_leaf=200, random_state=RANDOM_STATE)),
     "random_forest": (RandomForestClassifier, dict(
-        n_estimators=100, max_depth=12, min_samples_leaf=50, class_weight="balanced",
+        n_estimators=100, max_depth=12, min_samples_leaf=50,
         n_jobs=-1, random_state=RANDOM_STATE)),
     # early_stopping=False de propósito: a validação interna é aleatória por aluno e misturaria
     # alunos do mesmo município no treino e na validação (parada otimista demais).
     "hist_gradient_boosting": (HistGradientBoostingClassifier, dict(
-        max_depth=4, learning_rate=0.05, max_iter=200, class_weight="balanced",
+        max_depth=4, learning_rate=0.05, max_iter=200,
         early_stopping=False, random_state=RANDOM_STATE)),
 }
 
