@@ -1,24 +1,20 @@
-"""Calibração das probabilidades no conjunto de teste.
+"""Calibração das probabilidades no teste, e o teto que os dados permitem.
 
 O enunciado pede prever se um aluno será alfabetizado "utilizando variáveis educacionais,
-territoriais e socioeconômicas". Todas essas variáveis são do município: alunos da mesma
-cidade recebem o mesmo vetor de features, e o modelo estima a probabilidade de risco para um
-aluno inserido em determinado contexto — não para uma criança específica.
+territoriais e socioeconômicas". Todas essas variáveis são do município: alunos da mesma cidade
+recebem o mesmo vetor de features, e o modelo estima a probabilidade de risco para um aluno
+inserido em determinado contexto — não para uma criança específica.
 
 Para essa pergunta, a métrica central é a calibração: quando o modelo diz 40% de risco, cerca
 de 40% dos alunos daquele contexto não se alfabetizam? ROC-AUC mede outra coisa — a capacidade
-de ordenar indivíduos — e continua reportada em `comparar_teste`, ao lado desta.
+de ordenar alunos — e continua reportada em `comparar_teste`, ao lado desta.
 
-Todos os modelos usam class_weight="balanced", escolha deliberada para priorizar o recall da
-classe de risco. O efeito colateral é previsível: o modelo aprende como se metade dos alunos
-fosse de risco, quando a taxa real no treino é cerca de 41%, e superestima o risco em 6 a 8
-pontos em todas as faixas. A ordenação não é afetada — o ROC-AUC fica idêntico.
-
-A correção é analítica e não exige retreinar: reverter o deslocamento de prior. Treinar com
-pesos balanceados equivale a assumir prior de 0,5; reescalar as chances pela razão do prior real
-devolve probabilidades calibradas. Usa apenas a taxa de risco do treino — nada do teste.
+Este módulo verifica, não corrige. Os modelos não usam class_weight, e as probabilidades saem
+calibradas de origem; o experimento que levou a essa decisão está em
+`experimento_class_weight`.
 
 Reaproveita as probabilidades já gravadas por `salvar_resultados`: nenhum modelo é retreinado.
+Toda a avaliação é feita sem o RS.
 
 Uso: python -m src.evaluation.calibracao
 """
@@ -33,6 +29,9 @@ from src.visualization.graficos import COR, _salvar
 
 N_FAIXAS = 10
 CORES_MODELOS = [COR, "#1F77B4", "#2CA02C", "#9467BD", "#FF7F0E"]
+
+# Chaves e alvo de `features_aluno`: não são features
+NAO_FEATURES = ["ano", "id_aluno", "id_escola", "id_municipio", "alfabetizado", "peso_aluno"]
 
 
 def faixas_de_calibracao(y, proba, n_faixas: int = N_FAIXAS) -> pd.DataFrame:
@@ -60,12 +59,13 @@ def resumo(y, proba) -> dict:
     y = np.asarray(y)
     brier = brier_score_loss(y, proba)
     brier_ref = brier_score_loss(y, np.full(len(y), y.mean()))
-    tabela = faixas_de_calibracao(y, proba)
     return {
         "brier": brier,
         "brier_referencia": brier_ref,
         "brier_skill": 1 - brier / brier_ref,   # fração do erro da referência que o modelo elimina
-        "ece_pontos": 100 * erro_esperado_calibracao(tabela),
+        "ece_pontos": 100 * erro_esperado_calibracao(faixas_de_calibracao(y, proba)),
+        "risco_medio_previsto_pct": 100 * float(np.mean(proba)),
+        "risco_observado_pct": 100 * float(y.mean()),
         "roc_auc": roc_auc_score(y, proba),
         "alunos": len(y),
     }
@@ -79,21 +79,6 @@ def decis(y, proba) -> pd.DataFrame:
             .agg(alunos=("y", "size"), risco_previsto=("proba", "mean"), risco_observado=("y", "mean")))
 
 
-def corrigir_prior(proba, prior_treino: float):
-    """Remove o deslocamento introduzido por class_weight="balanced".
-
-    Pesos balanceados equivalem a treinar com prior de 0,5. A probabilidade calibrada sai de
-    odds_real = odds_modelo * prior/(1 - prior), onde prior é a taxa de risco do treino.
-
-    Transformação monotônica: preserva a ordem dos alunos, portanto ROC-AUC, PR-AUC e a curva
-    precisão-recall não mudam. O limiar escolhido para o recall-alvo continua válido, desde que
-    convertido pela mesma função.
-    """
-    p = np.clip(np.asarray(proba, dtype=float), 1e-6, 1 - 1e-6)
-    odds = p / (1 - p) * prior_treino / (1 - prior_treino)
-    return odds / (1 + odds)
-
-
 def carregar_probas(dados) -> dict:
     """Probabilidades de teste de cada modelo, conferidas contra o teste atual."""
     probas = {}
@@ -105,24 +90,17 @@ def carregar_probas(dados) -> dict:
     return probas
 
 
-def plot_calibracao(antes: dict, depois: dict, nome_arquivo: str):
-    """Diagrama de confiabilidade, antes e depois da correção de prior."""
-    fig, eixos = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-    for ax, curvas, titulo in ((eixos[0], antes, "Original (class_weight balanced)"),
-                               (eixos[1], depois, "Após correção de prior")):
-        ax.plot([0, 1], [0, 1], "--", color="gray", label="calibração perfeita")
-        for (nome, tabela), cor in zip(curvas.items(), CORES_MODELOS):
-            ax.plot(tabela["risco_previsto"], tabela["risco_observado"], "o-", color=cor,
-                    linewidth=2, markersize=5, label=nome)
-        ax.set_xlabel("Risco previsto pelo modelo"); ax.set_title(titulo)
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-    eixos[0].set_ylabel("Risco observado no teste")
-    fig.suptitle("Calibração no teste — sem RS, municípios nunca vistos no treino")
+def plot_calibracao(curvas: dict, nome_arquivo: str):
+    """Diagrama de confiabilidade: a diagonal é a calibração perfeita."""
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.plot([0, 1], [0, 1], "--", color="gray", label="calibração perfeita")
+    for (nome, tabela), cor in zip(curvas.items(), CORES_MODELOS):
+        ax.plot(tabela["risco_previsto"], tabela["risco_observado"], "o-", color=cor,
+                linewidth=2, markersize=5, label=nome)
+    ax.set_xlabel("Risco previsto pelo modelo"); ax.set_ylabel("Risco observado no teste")
+    ax.set_title("Calibração no teste — sem RS, municípios nunca vistos no treino")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.legend(fontsize=8); ax.grid(alpha=0.3)
     _salvar(fig, nome_arquivo); plt.show()
-
-
-# Chaves e alvo de `features_aluno`: não são features
-NAO_FEATURES = ["ano", "id_aluno", "id_escola", "id_municipio", "alfabetizado", "peso_aluno"]
 
 
 def features_que_variam_no_municipio() -> tuple:
@@ -134,7 +112,7 @@ def features_que_variam_no_municipio() -> tuple:
     return variam, len(features)
 
 
-def teto_municipal(dados, probas: dict, prior: float) -> pd.DataFrame:
+def teto_municipal(dados, probas: dict, mascara) -> tuple:
     """O melhor resultado possível com features municipais, e quanto dele cada modelo alcança.
 
     Como todo aluno de uma cidade recebe o mesmo vetor de features, nenhum modelo supera um
@@ -142,11 +120,10 @@ def teto_municipal(dados, probas: dict, prior: float) -> pd.DataFrame:
     se quer prever —, mas define o teto de qualquer modelo construído com estes dados.
 
     "Fração alcançada" é o ganho do modelo dividido pelo ganho do teto: sobre o acaso, no
-    ROC-AUC; sobre prever sempre a média, no Brier. Mesma base em tudo: teste, sem RS.
+    ROC-AUC; sobre prever sempre a média, no Brier.
     """
-    sem_rs = (dados.X_teste["sigla_uf"] != "RS").values
-    y = dados.y_teste.values[sem_rs]
-    grupos = dados.g_teste.values[sem_rs]
+    y = dados.y_teste.values[mascara]
+    grupos = dados.g_teste.values[mascara]
 
     taxa_real = pd.Series(y).groupby(grupos).transform("mean").values
     referencia = brier_score_loss(y, np.full(len(y), y.mean()))
@@ -154,7 +131,7 @@ def teto_municipal(dados, probas: dict, prior: float) -> pd.DataFrame:
 
     auc_teto, skill_teto = roc_auc_score(y, taxa_real), skill(taxa_real)
 
-    anterior = dados.X_teste["mun_taxa_ano_anterior"].values[sem_rs]
+    anterior = dados.X_teste["mun_taxa_ano_anterior"].values[mascara]
     anterior = np.where(np.isnan(anterior), np.nanmedian(anterior), anterior)
 
     variam, total = features_que_variam_no_municipio()
@@ -171,71 +148,49 @@ def teto_municipal(dados, probas: dict, prior: float) -> pd.DataFrame:
 
     linhas = []
     for nome, proba in probas.items():
-        p = proba[sem_rs]
+        p = proba[mascara]
         auc = roc_auc_score(y, p)
         linhas.append({
             "modelo": nome,
             "roc_auc": auc,
             "fracao_roc_auc_pct": 100 * (auc - 0.5) / (auc_teto - 0.5),
-            "brier_skill_original_pct": 100 * skill(p),
-            "fracao_brier_original_pct": 100 * skill(p) / skill_teto,
-            "brier_skill_corrigido_pct": 100 * skill(corrigir_prior(p, prior)),
-            "fracao_brier_corrigido_pct": 100 * skill(corrigir_prior(p, prior)) / skill_teto,
+            "brier_skill_pct": 100 * skill(p),
+            "fracao_brier_pct": 100 * skill(p) / skill_teto,
         })
 
-    resultado = pd.DataFrame(linhas).sort_values("fracao_brier_corrigido_pct", ascending=False)
+    resultado = pd.DataFrame(linhas).sort_values("fracao_brier_pct", ascending=False)
     pd.Series(contexto).to_frame("valor").to_csv(
         PASTA_RELATORIOS / "teto_contexto.csv", encoding="utf-8-sig")
     resultado.to_csv(PASTA_RELATORIOS / "teto_teste.csv", index=False, encoding="utf-8-sig")
     return contexto, resultado
 
 
-def calibracao_teste(dados=None) -> pd.DataFrame:
-    """Calibração de todos os modelos, com e sem RS.
-
-    A versão sem RS é a principal: a anomalia documentada na Fase 2 desloca o risco observado do
-    estado inteiro, e misturá-la à calibração mede a anomalia, não o modelo.
-    """
+def calibracao_teste(dados=None):
+    """Calibração de todos os modelos no teste, sem o RS, e o teto dos dados."""
     dados = dados or preparar_dados()
     probas = carregar_probas(dados)
-    prior = float(dados.y_treino.mean())   # taxa de risco do TREINO
-    sem_rs = (dados.X_teste["sigla_uf"] != "RS").values
-    todos = np.ones_like(sem_rs, dtype=bool)
+    mascara = (dados.X_teste["sigla_uf"] != "RS").values
+    y = dados.y_teste.values[mascara]
 
-    linhas, antes, depois = [], {}, {}
-    for nome, proba_original in probas.items():
-        proba_corrigida = corrigir_prior(proba_original, prior)
+    linhas, curvas = [], {}
+    for nome, proba in probas.items():
+        p = proba[mascara]
+        linhas.append({"modelo": nome, **resumo(y, p)})
+        curvas[nome] = faixas_de_calibracao(y, p)
+        curvas[nome].to_csv(PASTA_RELATORIOS / f"calibracao_{nome}_faixas.csv", encoding="utf-8-sig")
+        decis(y, p).to_csv(PASTA_RELATORIOS / f"calibracao_{nome}_decis.csv", encoding="utf-8-sig")
 
-        # Gravadas com outro prefixo para nao colidir com o glob de comparar_teste
-        pd.DataFrame({"proba": proba_corrigida}, index=dados.y_teste.index).to_parquet(
-            PASTA_RELATORIOS / f"probas_calibradas_{nome}.parquet")
-
-        for versao, proba in (("original", proba_original), ("corrigida", proba_corrigida)):
-            for recorte, mascara in (("sem RS", sem_rs), ("com RS", todos)):
-                y, p = dados.y_teste.values[mascara], proba[mascara]
-                linhas.append({"modelo": nome, "probabilidade": versao, "recorte": recorte,
-                               **resumo(y, p)})
-                if recorte == "sem RS":
-                    tabela = faixas_de_calibracao(y, p)
-                    (antes if versao == "original" else depois)[nome] = tabela
-                    tabela.to_csv(PASTA_RELATORIOS / f"calibracao_{nome}_{versao}_faixas.csv",
-                                  encoding="utf-8-sig")
-                    if versao == "corrigida":
-                        decis(y, p).to_csv(PASTA_RELATORIOS / f"calibracao_{nome}_decis.csv",
-                                           encoding="utf-8-sig")
-
-    resultado = (pd.DataFrame(linhas)
-                 .sort_values(["recorte", "probabilidade", "brier"], ascending=[False, True, True]))
+    resultado = pd.DataFrame(linhas).sort_values("brier")
     resultado.to_csv(PASTA_RELATORIOS / "calibracao_teste.csv", index=False, encoding="utf-8-sig")
-    plot_calibracao(antes, depois, "calibracao_teste.png")
-    return resultado, teto_municipal(dados, probas, prior)
+    plot_calibracao(curvas, "calibracao_teste.png")
+    return resultado, teto_municipal(dados, probas, mascara)
 
 
 if __name__ == "__main__":
     tabela, (contexto, teto) = calibracao_teste()
-    print("=== Calibração no teste ===")
+    print("=== Calibração no teste, sem RS ===")
     print(tabela.round(4).to_string(index=False))
-    print("\n=== O limite dos dados — teste, sem RS ===")
+    print("\n=== O limite dos dados ===")
     for chave, valor in contexto.items():
         print(f"  {chave:42} {valor:.3f}" if isinstance(valor, float) else f"  {chave:42} {valor}")
     print("\n=== Quanto do teto cada modelo alcança ===")

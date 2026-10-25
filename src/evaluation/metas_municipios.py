@@ -4,14 +4,13 @@ Como as features são do município, a média das probabilidades previstas para 
 cidade é uma estimativa da taxa de alfabetização daquela cidade. Comparada com a meta pactuada,
 ela indica quem tende a ficar abaixo.
 
-A calibração importa para uma das duas perguntas, e não para a outra — o backtest roda com as
-duas versões das probabilidades para mostrar isso:
+A estimativa responde a duas perguntas, com exigências diferentes:
 
-- **Quem fica abaixo da meta?** Depende da calibração. As probabilidades originais, infladas por
-  class_weight="balanced", rebaixam a taxa prevista de todo município, e oito em cada dez
-  seriam sinalizados, quando de fato são quatro.
-- **Por onde começar?** Não depende. A ordem de prioridade quase não muda, e a precisão entre
-  os municípios de maior risco é a mesma nas duas versões.
+- **Quem fica abaixo da meta?** Exige que a probabilidade esteja certa em valor, ou a taxa
+  prevista de todo município sairia deslocada. Os modelos não usam class_weight, e as
+  probabilidades saem calibradas de origem (ver `calibracao`).
+- **Por onde começar?** Exige só a ordem. A precisão entre os municípios de maior risco mede
+  isso.
 
 Este módulo é um backtest. O modelo usa contexto de 2023 para prever 2024, então a pergunta
 "quem não atingirá a meta de 2024" pode ser respondida e, em seguida, conferida contra o que de
@@ -123,33 +122,24 @@ def plot_taxas(avaliaveis: pd.DataFrame, nome_arquivo: str):
     _salvar(fig, nome_arquivo); plt.show()
 
 
-def carregar_proba(arquivo, dados) -> np.ndarray:
-    if not arquivo.exists():
-        raise SystemExit(f"{arquivo.name} ausente. Rode antes: python -m src.evaluation.calibracao")
-    proba = pd.read_parquet(arquivo)["proba"]
-    assert proba.index.equals(dados.y_teste.index), "probabilidades de outro conjunto de teste"
-    return proba.values
-
-
 def metas_municipios(nome_modelo: str = MODELO_PADRAO, dados=None):
     dados = dados or preparar_dados()
 
-    versoes = {
-        "calibrada": PASTA_RELATORIOS / f"probas_calibradas_{nome_modelo}.parquet",
-        "original": PASTA_RELATORIOS / f"probas_teste_{nome_modelo}.parquet",
-    }
+    arquivo = PASTA_RELATORIOS / f"probas_teste_{nome_modelo}.parquet"
+    if not arquivo.exists():
+        raise SystemExit(f"{arquivo.name} ausente. Rode antes o notebook do modelo.")
+    proba = pd.read_parquet(arquivo)["proba"]
+    assert proba.index.equals(dados.y_teste.index), "probabilidades de outro conjunto de teste"
 
-    metricas, avaliaveis = {}, {}
-    for versao, arquivo in versoes.items():
-        avaliaveis[versao] = classificar(taxas_por_municipio(dados, carregar_proba(arquivo, dados)))
-        metricas[versao] = metricas_backtest(avaliaveis[versao])
+    avaliaveis = classificar(taxas_por_municipio(dados, proba.values))
+    metricas = metricas_backtest(avaliaveis)
 
-    pd.DataFrame(metricas).to_csv(PASTA_RELATORIOS / "metas_backtest.csv", encoding="utf-8-sig")
-    # O ranking entregue é o da versão calibrada, a única que responde "fica abaixo ou não"
-    avaliaveis["calibrada"].to_csv(PASTA_RELATORIOS / "metas_municipios_risco.csv", index=False,
-                                   encoding="utf-8-sig")
-    plot_taxas(avaliaveis["calibrada"], "metas_backtest_municipios.png")
-    return metricas, avaliaveis["calibrada"]
+    pd.Series(metricas, name=nome_modelo).to_frame().to_csv(
+        PASTA_RELATORIOS / "metas_backtest.csv", encoding="utf-8-sig")
+    avaliaveis.to_csv(PASTA_RELATORIOS / "metas_municipios_risco.csv", index=False,
+                      encoding="utf-8-sig")
+    plot_taxas(avaliaveis, "metas_backtest_municipios.png")
+    return metricas, avaliaveis
 
 
 if __name__ == "__main__":
@@ -157,7 +147,8 @@ if __name__ == "__main__":
     metricas, avaliaveis = metas_municipios(modelo)
 
     print(f"=== Backtest da meta de 2024 — {modelo} ===")
-    print(pd.DataFrame(metricas).round(3).to_string())
+    for chave, valor in metricas.items():
+        print(f"  {chave:34} {valor:.3f}" if isinstance(valor, float) else f"  {chave:34} {valor}")
 
     colunas = ["id_municipio", "sigla_uf", "alunos", "taxa_prevista", "meta", "distancia_prevista",
                "taxa_observada"]
