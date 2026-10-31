@@ -117,7 +117,8 @@ que entrega dado pronto para consumo passa a entregar o que este consumo exige.
 
 ### `features_aluno` ✅
 
-Uma linha por estudante avaliado em 2024, com 35 colunas.
+Uma linha por estudante avaliado em 2024, com 35 colunas. O significado, a faixa de valores e
+o tratamento de cada coluna estão no [dicionário de dados](DICIONARIO.md).
 
 | Métrica | Valor |
 |---|---:|
@@ -153,10 +154,9 @@ elegibilidade do município, e `taxa_2023 − meta_2024`, que mede quanto faltav
 2023 para alcançar a meta do ano seguinte. Essa última capta pressão institucional sobre
 a rede — município longe da meta tende a mobilizar esforço.
 
-**A taxa de alfabetização adulta usa 25 anos ou mais.** A faixa da fonte começa em 15,
-mas 15 a 24 inclui jovens ainda em formação, cuja alfabetização reflete o presente do
-sistema e não o contexto familiar da criança. Como a faixa começa em 15 anos, **nenhuma
-criança avaliada aparece na tabela** — não há vazamento.
+**A taxa de alfabetização adulta é a da população de 15 anos ou mais**, como o Censo 2022
+publica por município. Ela descreve a escolaridade do entorno da criança, não a dela: como a
+faixa começa em 15 anos, **nenhuma criança avaliada aparece na tabela** — não há vazamento.
 
 **Nenhuma contagem absoluta entra no modelo.** População indígena de 200 num município de
 5 mil habitantes e de 200 em um de 2 milhões descrevem realidades opostas. Tudo vira
@@ -185,9 +185,11 @@ delas aparecer no contrato.
 dos alunos daquele município. Usá-la para prever um aluno de 2024 vaza o resultado da
 própria turma.
 
-A solução foi restringir o dataset a **alunos de 2024 com contexto municipal de 2023**.
-Corta o volume à metade e, em troca, o modelo fica genuinamente preditivo: prevê o ano
-corrente com informação do ano anterior, que é o uso que um gestor faria.
+A solução foi restringir o dataset a **alunos de 2024, com a taxa de alfabetização municipal
+de 2023**. Corta o volume à metade e, em troca, o modelo fica genuinamente preditivo: prevê o
+ano corrente com o resultado do ano anterior, que é o uso que um gestor faria. As variáveis de
+estrutura escolar vêm do Censo Escolar de 2024, que descreve escolas, turmas e docentes, e não
+o resultado da avaliação.
 
 **Vazamento de contexto — o mais sutil.** As features municipais se repetem em todos os
 alunos do município. Medido em `sql/gold/pseudo_replicacao.sql`:
@@ -197,7 +199,7 @@ alunos do município. Medido em `sql/gold/pseudo_replicacao.sql`:
 | Linhas | 1.610.754 |
 | Municípios | 5.450 |
 | Alunos por município (média) | 295,6 |
-| Alunos por município (mediana) | 944 |
+| Tamanho do município do aluno típico (mediana) | 944 |
 | Máximo | 43.340 |
 
 O tamanho efetivo da amostra para variáveis municipais é **5.450**, não 1,6 milhão. Um
@@ -821,7 +823,7 @@ alfabetização daquela cidade — e, comparada com a meta pactuada, indica quem
 abaixo. A estimativa exige probabilidades certas em valor, não só em ordem, e é por isso que a
 calibração da seção 7 importa aqui.
 
-**Backtest.** O modelo usa contexto de 2023 para prever 2024, então a previsão pode ser
+**Backtest.** O modelo usa o resultado de 2023 para prever 2024, então a previsão pode ser
 conferida contra o que de fato aconteceu. Em 889 municípios do teste — nunca vistos no
 treino, sem RS, com meta publicada e ao menos 30 alunos avaliados:
 
@@ -1011,7 +1013,7 @@ Validação:
 aws s3 ls s3://<bucket>/fase3/bronze/ --recursive --region us-east-1
 ```
 
-**3. Criar a infraestrutura** — 6 recursos:
+**3. Criar a infraestrutura** — 9 recursos:
 
 ```bash
 cd infra/terraform
@@ -1101,6 +1103,17 @@ data, aponte diretamente para a partição desejada.
 
 ### Notebooks
 
+Rodar na ordem: cada notebook usa decisões do anterior.
+
+| Notebook | O que faz |
+|---|---|
+| [`01_eda`](notebooks/01_eda.ipynb) | O que os dados mostram sobre a alfabetização, e as hipóteses que isso gera para o modelo |
+| [`02_selecao_features`](notebooks/02_selecao_features.ipynb) | Como cada coluna é tratada e quais entram no modelo; grava as decisões em `src/config/features_modelo.json` |
+| [`03_modelagem_supervisionada`](notebooks/03_modelagem_supervisionada.ipynb) | Pipeline de pré-processamento e modelos de referência (baseline) |
+| [`04_random_forest`](notebooks/04_random_forest.ipynb) | Random Forest: otimização, avaliação e interpretação |
+| [`05_hist_gradient_boosting`](notebooks/05_hist_gradient_boosting.ipynb) | HistGradientBoosting, o modelo escolhido |
+| [`06_arvore_decisao`](notebooks/06_arvore_decisao.ipynb) | Árvore de decisão rasa: regras que um gestor consegue ler |
+
 As dependências de notebook (`jupyterlab`, `ipykernel`) já estão no `requirements.txt`
 principal — não é necessário instalar nada à parte.
 
@@ -1138,6 +1151,7 @@ principal — não é necessário instalar nada à parte.
 │   └── visualization/# graficos reutilizaveis
 ├── tests/
 ├── requirements.txt
+├── DICIONARIO.md     # dicionario de dados
 └── README.md
 ```
 
@@ -1186,9 +1200,9 @@ contexto perdido amanhã.
 | Histórico de ingestão consultável por data | [`images/ConsultaAthenaCenso_2022_municipio.png`](images/ConsultaAthenaCenso_2022_municipio.png) | ✅ |
 | Dados da Bronze no Athena | [`images/ConsultaAthenaCenso_2022_municipio_dados.png`](images/ConsultaAthenaCenso_2022_municipio_dados.png) | ✅ |
 | Verificação de `features_aluno` no Athena | [`images/ConsultaAthenaFase3_gold.png`](images/ConsultaAthenaFase3_gold.png) | ✅ |
-| Print — `terraform apply` | `images/` | ⏳ |
-| Print — crawler com partição reconhecida | `images/` | ⏳ |
-| Print — Glue Job da Gold concluído | `images/` | ⏳ |
+| Print — `terraform apply` | [`images/TerraformApply.png`](images/TerraformApply.png) | ✅ |
+| Print — crawler com partição reconhecida | [`images/crawler.png`](images/crawler.png) | ✅ |
+| Print — Glue Job da Gold concluído | [`images/GlueWorkflowConcluido.png`](images/GlueWorkflowConcluido.png) | ✅ |
 | Notebook de EDA com saídas | [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb) | ✅ |
 | Notebooks de modelagem | [`notebooks/03`](notebooks/03_modelagem_supervisionada.ipynb) a [`06`](notebooks/06_arvore_decisao.ipynb) | ✅ |
 | Matriz de confusão e curva ROC | [`images/hgb_avaliacao_teste.png`](images/hgb_avaliacao_teste.png) | ✅ |
