@@ -117,7 +117,8 @@ que entrega dado pronto para consumo passa a entregar o que este consumo exige.
 
 ### `features_aluno` ✅
 
-Uma linha por estudante avaliado em 2024, com 35 colunas.
+Uma linha por estudante avaliado em 2024, com 35 colunas. O significado, a faixa de valores e
+o tratamento de cada coluna estão no [dicionário de dados](DICIONARIO.md).
 
 | Métrica | Valor |
 |---|---:|
@@ -1150,6 +1151,7 @@ principal — não é necessário instalar nada à parte.
 │   └── visualization/# graficos reutilizaveis
 ├── tests/
 ├── requirements.txt
+├── DICIONARIO.md     # dicionario de dados
 └── README.md
 ```
 
